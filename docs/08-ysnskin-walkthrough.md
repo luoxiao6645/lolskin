@@ -1,9 +1,3 @@
-# 08 · YsnSkin 完整实现走读（对照修正依据）
-
-> 来源：`YsnSkin-V0.1.50` 发布包内可读代码（pengu-plugin/*.js、lcu-bridge.js、
-> pengu-loader README）+ 二进制字符串分析。本文档回答"YsnSkin 到底怎么实现的"，
-> 并给出与我们实现的差异对照。
-
 ## 1. 进程与通信架构
 
 ```
@@ -85,27 +79,9 @@ WPF 悬浮窗（companionoverlaywindow.xaml + companiontipwindow.xaml）
   → 同一套构建/注入链路（rd-runoverlay stdout=）
 ```
 
-## 4. 与我们实现的差异对照（修正清单）
 
-| 环节 | YsnSkin 做法 | 我们当前 | 差异与修正 |
-|---|---|---|---|
-| 皮肤列表数据源 | C# 目录 + LCU championId | 本地 catalog + LCU 轮询 | ✅ 数据源相同；**我们的 bug 在 tkinter 跨线程更新 UI**（root.after 从后台线程调用不可靠），需改 queue + 主线程轮询 |
-| 英雄检测 | C# 侧 LCU 会话（championId/pickIntent） | 同 | ✅ 一致（训练营 championId=0 取 pickIntent 已处理） |
-| 皮肤提交 | skin.switch.request（桥）→ C# 构建 | 本地直接构建 | ✅ 语义相同 |
-| 构建状态机 | Queued→Building→Applying→Ready + operationId/selectionId 去重 | 同步构建（无状态机） | 简化可接受；但 **Ready 前不启动补丁器**——YsnSkin 构建完才启动注入（我们一致） |
-| 注入时机 | 构建 Ready 后启动 ltk_patcher_host | 同 | ✅ 一致；**未验证环节：DLL 重定向表是否建立**（需 DLL 日志确认） |
-| LCU PATCH | my-selection 主 + actions 兜底，1.5s 超时 | 已对齐（my-selection + actions 兜底） | ✅ 已按 YsnSkin 修改；**训练营 PATCH 无效是客户端机制问题，不影响换肤** |
-| 换肤生效 | 注入重定向（CreateFileA） | 同 | ⚠️ **当前主攻问题**：注入成功（dll attached）但游戏加载读原版 WAD——需 DLL 日志定位重定向表是否建立 |
-| 授权 | RSA 票据 + 设备绑定 | 无 | 个人使用不需要 |
-| UI | 客户端内 DOM 改造（模式二）/ WPF（模式一） | tkinter 悬浮窗 | 独立窗口方案可行；先修线程问题 |
-
-## 5. 修正行动计划（按此执行）
+## 修正行动计划（按此执行）
 
 1. **修复悬浮窗 UI 线程问题**：queue.Queue + 主线程 `root.after` 轮询消费（tkinter 线程安全模式）；
 2. **注入链路定位**：ASCII overlay + 补丁器先就位 + patcher_diag2 全日志（DLL 的
    `WAD scan ok / patched CRYPTO_free / redirected wad` 三步日志），确认重定向表建立；
-3. **按 YsnSkin 语义验收**：游戏内换肤成功 = 注入生效（PATCH 只是 UI 同步，训练营
-   可测注入效果）；
-4. 若重定向表建立但仍无效 → 检查 CreateFileA 钩子是否拦截国服客户端的 WAD 打开
-   （国服魔改可能用 CreateFileW/NtCreateFile——这是 ltk 系在 Riot 服有效、国服
-   可能失效的差异点，届时需验证 DLL 日志的 "redirected wad" 是否出现）。

@@ -79,7 +79,8 @@ class Gameflow:
             session = self.client.get_json(CHAMP_SELECT_SESSION)
         except Exception:
             return False
-        local_cell = int(session.get("localPlayerCellId") or 0)
+        local_cell = session.get("localPlayerCellId")
+        local_cell_int = int(local_cell) if local_cell is not None else -1
         actions = session.get("actions") or []
         # actions 可能是嵌套数组（按阶段分组），拍平
         flat: list[dict] = []

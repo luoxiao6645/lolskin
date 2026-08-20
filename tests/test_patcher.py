@@ -17,7 +17,8 @@ class TestPatcherHost(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             overlay = Path(tmp)
-            (overlay / "fake.wad.client").write_bytes(b"test")
+            (overlay / "DATA" / "FINAL" / "Champions").mkdir(parents=True)
+            (overlay / "DATA" / "FINAL" / "Champions" / "fake.wad.client").write_bytes(b"test")
             with PatcherHost(overlay) as host:
                 event = host.wait_for_state("injecting", timeout=15)
                 self.assertEqual(event.detail, "scanning for game")

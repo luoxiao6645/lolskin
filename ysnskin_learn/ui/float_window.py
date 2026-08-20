@@ -220,45 +220,60 @@ class SkinFloater:
         threading.Thread(target=self._swap_worker, args=(champion, skin), daemon=True).start()
 
     def _swap_worker(self, champion: Champion, skin: Skin) -> None:
+        from ..diag import error, log
+
         try:
             # 1) 构建覆盖 WAD（game_index 缓存后约几秒）
             t0 = time.monotonic()
-            self._set_status("构建覆盖 WAD …")
+            self._set_status(f"构建 {skin.name} …")
+            log("SWAP", "开始构建", champion=champion.alias, skin_num=skin.skin_num)
             result = self.swapper.build_overlay(champion.alias.lower(), skin.skin_num)
+            log("SWAP", "构建完成", elapsed_s=round(time.monotonic() - t0, 1),
+                overlay=str(result.overlay_root))
             self._set_status(f"构建完成 {time.monotonic() - t0:.0f}s，启动补丁器…")
             # 2) 提权补丁器（UAC 弹窗首次需授权；国服游戏以管理员运行）
             from ..patcher import PatcherHost
             host = PatcherHost(result.overlay_root, elevate=True)
             host.start()
+            log("SWAP", "补丁器已启动，等待游戏进程", pid=host.proc.pid if host.proc else None)
             self._set_status("补丁器就位！现在可以点【开始】进入游戏")
             # 3) 真实对局时同步 PATCH LCU（训练营 PATCH 无效，跳过影响）
             if self.gameflow is not None:
                 try:
                     if self.gameflow.select_skin(skin.id):
+                        log("SWAP", "LCU 已同步皮肤", skin_id=skin.id)
                         self._set_status(f"已选择 {skin.name}，补丁器待命")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    log("SWAP", "LCU 同步失败（不影响游戏内换肤）", error=str(exc))
             # 4) 保持补丁器运行直到游戏结束，实时显示状态
             last_state = ""
+            seen_logs = 0
             while host.proc is not None and host.proc.poll() is None:
                 state = host.last_state
                 if state and state != last_state:
                     last_state = state
                     detail = host.events[-1].detail if host.events else ""
+                    log("PATCHER", f"状态: {state} {detail}")
                     if state == "injected":
                         self._set_status(f"注入成功！游戏内应为 {skin.name}", OK)
                     elif state == "failed":
                         self._set_status(f"注入失败: {detail}", DANGER)
+                        error("PATCHER", "注入失败", detail=detail,
+                              hint="游戏以管理员运行时补丁器必须 --elevate（已默认）；"
+                                   "若仍失败见 session/diag.log 的 DLL 日志")
                     else:
                         self._set_status(f"补丁器: {state} {detail}")
                 # 打印 DLL 日志到控制台（诊断用）
-                for line in host.logs:
-                    if "ltk_patcher_dll" in line:
-                        print(f"[dll] {line}", flush=True)
+                for line in host.logs[seen_logs:]:
+                    log("DLL", line)
+                seen_logs = len(host.logs)
                 time.sleep(1)
             host.stop()
+            log("SWAP", "补丁器已停止（游戏退出）")
             self._set_status("补丁器已停止（游戏退出）")
         except Exception as exc:
+            error("SWAP", "换肤流程失败", error=str(exc),
+                  hint="按上方环节标记（B*/C*/DLL）定位；详见 session/diag.log")
             self._set_status(f"换肤失败: {exc}", DANGER)
         finally:
             self._busy = False

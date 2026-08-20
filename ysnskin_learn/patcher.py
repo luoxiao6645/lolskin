@@ -48,23 +48,52 @@ class PatcherHost:
     # ---- 生命周期 ----
 
     def start(self) -> None:
+        from .diag import error, log
+
         if not self.patcher_host.is_file():
             raise PatcherError(f"补丁器不存在: {self.patcher_host}")
         if not self.overlay_dir.is_dir():
             raise PatcherError(f"覆盖目录不存在: {self.overlay_dir}")
+        if not (self.overlay_dir / "DATA" / "FINAL").is_dir():
+            raise PatcherError(
+                f"覆盖目录缺少 DATA/FINAL（不是有效的 overlay）: {self.overlay_dir}")
         args = [str(self.patcher_host)]
         if self.elevate:
             args.append("--elevate")
         args += ["runoverlay", str(self.overlay_dir)]
-        self.proc = subprocess.Popen(
-            args,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        log("C1", "启动补丁器", exe=str(self.patcher_host), elevate=self.elevate,
+            overlay=str(self.overlay_dir))
+        try:
+            self.proc = subprocess.Popen(
+                args,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError as exc:
+            raise PatcherError(f"补丁器启动失败: {exc}") from exc
+        # UAC 拒绝检测：提权子进程若被拒绝会立即退出
+        import time as _time
+
+        _time.sleep(1.5)
+        if self.proc.poll() is not None:
+            rc = self.proc.returncode
+            stderr_tail = ""
+            if self.proc.stderr:
+                try:
+                    stderr_tail = self.proc.stderr.read()[:300]
+                except OSError:
+                    pass
+            self.proc = None
+            hint = ("UAC 授权被拒绝或提权失败" if self.elevate
+                    else "补丁器异常退出")
+            error("C2", "补丁器启动后立即退出", returncode=rc,
+                  stderr=stderr_tail.strip())
+            raise PatcherError(f"补丁器启动失败（{hint}，code={rc}）")
+        log("C2", "补丁器进程存活", pid=self.proc.pid)
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
         self._log_reader = threading.Thread(target=self._read_log_loop, daemon=True)

@@ -84,6 +84,13 @@ enum Cmd {
         #[arg(long = "string-prefix", num_args = 2, action = clap::ArgAction::Append)]
         string_prefixes: Vec<String>,
     },
+    /// 把 bin 转储为 JSON（属性完整可见，用于分析引用链）
+    BinDump {
+        /// 输入 bin 文件
+        input: PathBuf,
+        /// 输出 JSON 文件
+        output: PathBuf,
+    },
 }
 
 fn utf8(p: &PathBuf, what: &str) -> Result<String, String> {
@@ -162,7 +169,26 @@ fn main() -> Result<(), String> {
             map,
             string_prefixes,
         } => bin_edit(&input, &output, &map, &string_prefixes),
+        Cmd::BinDump { input, output } => bin_dump(&input, &output),
     }
+}
+
+/// bin-dump：解析 bin → 美化 JSON 写出（属性引用链完整可见）。
+fn bin_dump(input: &PathBuf, output: &PathBuf) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::BufReader;
+
+    use ltk_meta::property::NoMeta;
+    use ltk_meta::Bin;
+
+    let file = File::open(input).map_err(|e| format!("打开输入失败 {input:?}: {e}"))?;
+    let bin = Bin::<NoMeta>::from_reader(&mut BufReader::new(file))
+        .map_err(|e| format!("解析 bin 失败: {e}"))?;
+    let json = serde_json::to_value(&bin).map_err(|e| format!("序列化失败: {e}"))?;
+    let text = serde_json::to_string_pretty(&json).map_err(|e| format!("格式化失败: {e}"))?;
+    std::fs::write(output, text).map_err(|e| format!("写出失败: {e}"))?;
+    println!("OK 已写出 {output:?}");
+    Ok(())
 }
 
 /// bin-edit：serde JSON 中转的精确别名（对象 key/path_hash/Hash 引用/String 引用）。
@@ -234,13 +260,13 @@ fn edit_json_value(
             // PropertyValueEnum 形态: {"kind": "...", "value": ...}
             let is_prop = map.get("kind").and_then(|k| k.as_str()).is_some()
                 && map.contains_key("value");
-            // 先处理 key（objects 的 BinHash key 是 hex 字符串）
+            // 先处理 key（objects 的 BinHash key 是十进制数字字符串，如 "1125819694"）
             let keys: Vec<String> = map.keys().cloned().collect();
             for key in keys {
-                if let Ok(num) = u32::from_str_radix(&key, 16) {
+                if let Ok(num) = u32::from_str_radix(&key, 10) {
                     if let Some(&new) = hash_map.get(&num) {
                         let val = map.remove(&key).unwrap();
-                        map.insert(format!("{new:08x}"), val);
+                        map.insert(new.to_string(), val);
                         *renamed += 1;
                     }
                 }

@@ -49,9 +49,10 @@ def build_alias_map(object_hashes: list[int], old_prefix: str, new_prefix: str,
 
 
 def alias_bin_file(learn_overlay: str | Path, data: bytes, champion: str,
-                   skin_num: int, kind: str) -> bytes:
-    """对一个 bin 字节流执行全对象别名（skins 或 animations）。kind: 'skins'|'animations'。
+                   skin_num: int, kind: str) -> tuple[bytes, list[tuple[int, int]]]:
+    """对一个 bin 字节流执行全对象别名（skins 或 animations）。
 
+    返回 (改后字节, 映射)。kind: 'skins'|'animations'。
     流程：bin-list 拿对象 hash → binhashes 反查路径 → 生成映射 → bin-alias-map。
     """
     from .lhdb import Lhdb
@@ -71,18 +72,51 @@ def alias_bin_file(learn_overlay: str | Path, data: bytes, champion: str,
         hashes = [int(ln.split()[1], 16) for ln in proc.stdout.splitlines()
                   if ln.startswith("object ")]
         if not hashes:
-            return b""  # 无对象（空 bin），跳过
+            return b"", []
         # 2) binhashes 反查
         db = Lhdb.open(DEFAULT_BINHASHES)
         mapping = build_alias_map(hashes, old_prefix, new_prefix, db)
         if not mapping:
             raise RuntimeError(
                 f"未找到含 {old_prefix} 的对象（binhashes 表可能过期）")
-        # 3) 执行别名
-        map_file = tmp / "map.txt"
+        return run_bin_alias_map(learn_overlay, raw, data, mapping), mapping
+
+
+def alias_champion_bin(learn_overlay: str | Path, data: bytes, champion: str,
+                       skin_num: int, particle_map: list[tuple[int, int]]) -> bytes:
+    """角色 bin：{Champion}Skin{N}_Manager → {Champion}Skin0_Manager + 引用替换。
+
+    游戏按皮肤编号在角色 bin 查 {Champion}Skin{N}_Manager（技能特效管理器）；
+    训练营 selectedSkinId=base 时找不到 Skin0_Manager → 无特效。
+    别名后 base 编号也能拿到皮肤 N 的特效；Manager 属性引用的皮肤粒子对象
+    哈希一并替换（指向已别名的 Skin0/Particles/*）。
+    """
+    old_mgr = f"characters/{champion}/spells/{champion}skin{skin_num}_manager"
+    new_mgr = f"characters/{champion}/spells/{champion}skin0_manager"
+    mapping = [(fnv1a32(old_mgr.lower().encode("utf-8")),
+                fnv1a32(new_mgr.lower().encode("utf-8")))]
+    # 合并粒子映射（Manager 属性引用皮肤粒子对象），去重保序
+    seen = set(mapping)
+    for pair in particle_map:
+        if pair not in seen:
+            seen.add(pair)
+            mapping.append(pair)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        raw = tmp / "raw.bin"
+        raw.write_bytes(data)
+        return run_bin_alias_map(learn_overlay, raw, data, mapping)
+
+
+def run_bin_alias_map(learn_overlay: str | Path, raw: Path, data: bytes,
+                      mapping: list[tuple[int, int]]) -> bytes:
+    """执行 bin-alias-map 并返回输出字节。"""
+    with tempfile.TemporaryDirectory() as tmp2:
+        tmp2 = Path(tmp2)
+        map_file = tmp2 / "map.txt"
         map_file.write_text(
             "\n".join(f"{o:08x} {n:08x}" for o, n in mapping), encoding="utf-8")
-        out = tmp / "out.bin"
+        out = tmp2 / "out.bin"
         proc = subprocess.run(
             [str(learn_overlay), "bin-alias-map", str(raw), str(out), str(map_file)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -119,7 +153,7 @@ def build_skin_swap_mod(
         raise RuntimeError("bin-alias 需要 learn-overlay（先 cargo build --release）")
 
     # 全对象别名：skins/skinN.bin（根对象 + Particles 子对象）→ skin0
-    data = alias_bin_file(learn_overlay, data, champion, skin_num, "skins")
+    data, skin_mapping = alias_bin_file(learn_overlay, data, champion, skin_num, "skins")
 
     mod_root = Path(out_mod_dir)
     wad_name = f"{champion.capitalize()}.wad.client"
@@ -130,13 +164,29 @@ def build_skin_swap_mod(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
 
+    # 角色 bin：{Champion}Skin{N}_Manager → Skin0_Manager（特效管理器，
+    # 游戏按皮肤编号查它——训练营 selectedSkinId=base 时找不到 Skin0_Manager
+    # 导致无特效；别名后 base 编号也能拿到皮肤 N 的特效）
+    champ_bin_path = f"data/characters/{champion}/{champion}.bin"
+    champ_data = wad.read_path(champ_bin_path)
+    if champ_data is not None:
+        try:
+            champ_data = alias_champion_bin(learn_overlay, champ_data, champion,
+                                            skin_num, skin_mapping)
+            champ_target = (mod_root / "content" / "base" / wad_name /
+                            "data" / "characters" / champion / f"{champion}.bin")
+            champ_target.parent.mkdir(parents=True, exist_ok=True)
+            champ_target.write_bytes(champ_data)
+        except RuntimeError as exc:
+            print(f"[modgen][警告] 角色 bin 别名失败（特效可能缺失）: {exc}", flush=True)
+
     # 动画图 bin：Animations/skinN.bin → Animations/skin0.bin（存在时）
     anim_src = f"data/characters/{champion}/animations/skin{skin_num}.bin"
     anim_data = wad.read_path(anim_src)
     if anim_data is not None:
         try:
-            anim_data = alias_bin_file(learn_overlay, anim_data, champion,
-                                       skin_num, "animations")
+            anim_data, _ = alias_bin_file(learn_overlay, anim_data, champion,
+                                          skin_num, "animations")
             anim_target = (mod_root / "content" / "base" / wad_name /
                            "data" / "characters" / champion / "animations" / "skin0.bin")
             anim_target.parent.mkdir(parents=True, exist_ok=True)

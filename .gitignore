@@ -10,3 +10,7 @@ session/
 overlays/
 # 大体积可再下载数据（mimir 哈希表）
 data/hashes/
+
+# Rust 构建产物
+learn-overlay/target/
+learn-overlay/.cargo/

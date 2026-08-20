@@ -147,19 +147,35 @@ class PatcherHost:
     # ---- 事件 ----
 
     def _read_loop(self) -> None:
+        """解析宿主 stdout 行协议：
+        - `status <t> <state> <detail>` —— 状态事件
+        - `dll <ts> <pid> <tid> <level> <msg>` —— DLL 内部日志（ltk-manager protocol.rs 格式）
+        - 其余行保留到 logs 供诊断
+        """
         assert self.proc is not None and self.proc.stdout is not None
         for line in self.proc.stdout:
             line = line.strip()
-            if not line.startswith("status "):
+            if not line:
                 continue
-            parts = line.split(" ", 3)
-            if len(parts) < 3:
-                continue
-            elapsed = float(parts[1]) if len(parts) > 1 else 0.0
-            state = parts[2]
-            detail = parts[3] if len(parts) > 3 else ""
-            with self._lock:
-                self._events.append(PatcherEvent(state, detail, elapsed))
+            if line.startswith("status "):
+                parts = line.split(" ", 3)
+                if len(parts) < 3:
+                    continue
+                elapsed = float(parts[1]) if len(parts) > 1 else 0.0
+                state = parts[2]
+                detail = parts[3] if len(parts) > 3 else ""
+                with self._lock:
+                    self._events.append(PatcherEvent(state, detail, elapsed))
+            else:
+                # dll 日志与其他 stdout 行全部保留（DLL 内部 tracing 走这里）
+                with self._lock:
+                    self._logs.append(line)
+
+    @property
+    def dll_logs(self) -> list[str]:
+        """仅 DLL 内部日志（dll <ts> <pid> <tid> <level> <msg>）。"""
+        with self._lock:
+            return [ln for ln in self._logs if ln.startswith("dll ")]
 
     def _read_log_loop(self) -> None:
         """读取 stderr 日志（宿主 + DLL tracing 输出）。"""

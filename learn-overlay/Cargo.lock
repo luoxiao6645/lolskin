@@ -740,6 +740,9 @@ name = "glam"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "glob"
@@ -916,6 +919,7 @@ dependencies = [
  "ltk_hash",
  "ltk_meta",
  "ltk_overlay",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1029,6 +1033,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ada44666d233f89786fdfd6784346a140ddfc7c31d31ac23dfa7b066f9fbe41b"
 dependencies = [
  "byteorder",
+ "serde",
  "xxhash-rust",
 ]
 
@@ -1073,6 +1078,7 @@ dependencies = [
  "miette",
  "num_enum",
  "paste",
+ "serde",
  "thiserror 1.0.69",
 ]
 
@@ -1163,6 +1169,7 @@ checksum = "40c42f3eddcad904acfbdaa7d62efa643e8cad771b27b6a56a24eeabcfc80f94"
 dependencies = [
  "byteorder",
  "glam",
+ "serde",
  "thiserror 1.0.69",
 ]
 

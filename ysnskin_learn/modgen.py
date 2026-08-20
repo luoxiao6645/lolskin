@@ -59,6 +59,12 @@ def alias_bin_file(learn_overlay: str | Path, data: bytes, champion: str,
 
     old_prefix = f"characters/{champion}/{kind}/skin{skin_num}"
     new_prefix = f"characters/{champion}/{kind}/skin0"
+    # 字符串引用前缀（bin 内对象引用是 "Characters/X/Skins/SkinN..." 形式；
+    # 等长替换为 Skin0；ASSETS 资源路径不受影响）
+    cap = champion.capitalize()
+    kind_cap = "Skins" if kind == "skins" else "Animations"
+    str_prefixes = [f"Characters/{cap}/{kind_cap}/Skin{skin_num}",
+                    f"Characters/{cap}/{kind_cap}/Skin0"]
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         raw = tmp / "raw.bin"
@@ -79,7 +85,7 @@ def alias_bin_file(learn_overlay: str | Path, data: bytes, champion: str,
         if not mapping:
             raise RuntimeError(
                 f"未找到含 {old_prefix} 的对象（binhashes 表可能过期）")
-        return run_bin_alias_map(learn_overlay, raw, data, mapping), mapping
+        return run_bin_alias_map(learn_overlay, raw, data, mapping, str_prefixes), mapping
 
 
 def alias_champion_bin(learn_overlay: str | Path, data: bytes, champion: str,
@@ -101,28 +107,35 @@ def alias_champion_bin(learn_overlay: str | Path, data: bytes, champion: str,
         if pair not in seen:
             seen.add(pair)
             mapping.append(pair)
+    # 字符串引用前缀（Manager 属性可能字符串引用皮肤粒子对象）
+    cap = champion.capitalize()
+    str_prefixes = [f"Characters/{cap}/Skins/Skin{skin_num}",
+                    f"Characters/{cap}/Skins/Skin0"]
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         raw = tmp / "raw.bin"
         raw.write_bytes(data)
-        return run_bin_alias_map(learn_overlay, raw, data, mapping)
+        return run_bin_alias_map(learn_overlay, raw, data, mapping, str_prefixes)
 
 
 def run_bin_alias_map(learn_overlay: str | Path, raw: Path, data: bytes,
-                      mapping: list[tuple[int, int]]) -> bytes:
-    """执行 bin-alias-map 并返回输出字节。"""
+                      mapping: list[tuple[int, int]],
+                      string_prefixes: list[str] | None = None) -> bytes:
+    """执行 bin-edit（serde JSON 中转，精确无字节误伤）并返回输出字节。"""
     with tempfile.TemporaryDirectory() as tmp2:
         tmp2 = Path(tmp2)
         map_file = tmp2 / "map.txt"
         map_file.write_text(
             "\n".join(f"{o:08x} {n:08x}" for o, n in mapping), encoding="utf-8")
         out = tmp2 / "out.bin"
-        proc = subprocess.run(
-            [str(learn_overlay), "bin-alias-map", str(raw), str(out), str(map_file)],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=120)
+        cmd = [str(learn_overlay), "bin-edit", str(raw), str(out), str(map_file)]
+        prefixes = string_prefixes or []
+        for i in range(0, len(prefixes) - 1, 2):
+            cmd += ["--string-prefix", prefixes[i], prefixes[i + 1]]
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=120)
         if proc.returncode != 0:
-            raise RuntimeError(f"bin-alias-map 失败: {proc.stdout} {proc.stderr}")
+            raise RuntimeError(f"bin-edit 失败: {proc.stdout} {proc.stderr}")
         return out.read_bytes()
 
 

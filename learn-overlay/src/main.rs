@@ -71,6 +71,19 @@ enum Cmd {
         #[arg(long = "string-prefix", num_args = 2, action = clap::ArgAction::Append)]
         string_prefixes: Vec<String>,
     },
+    /// 同 bin-alias-map，但通过 serde JSON 中转（无字节级误伤风险）：
+    /// 对象表 key + path_hash + Hash 属性值 + String 属性值统一精确替换。
+    BinEdit {
+        /// 输入 bin 文件
+        input: PathBuf,
+        /// 输出 bin 文件
+        output: PathBuf,
+        /// 映射文件（每行 old new，hex u32）
+        map: PathBuf,
+        /// 可选字符串前缀替换：--string-prefix <old> <new>（可多次）
+        #[arg(long = "string-prefix", num_args = 2, action = clap::ArgAction::Append)]
+        string_prefixes: Vec<String>,
+    },
 }
 
 fn utf8(p: &PathBuf, what: &str) -> Result<String, String> {
@@ -143,6 +156,139 @@ fn main() -> Result<(), String> {
             map,
             string_prefixes,
         } => bin_alias_map(&input, &output, &map, &string_prefixes),
+        Cmd::BinEdit {
+            input,
+            output,
+            map,
+            string_prefixes,
+        } => bin_edit(&input, &output, &map, &string_prefixes),
+    }
+}
+
+/// bin-edit：serde JSON 中转的精确别名（对象 key/path_hash/Hash 引用/String 引用）。
+fn bin_edit(
+    input: &PathBuf,
+    output: &PathBuf,
+    map: &PathBuf,
+    string_prefixes: &[String],
+) -> Result<(), String> {
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::BufReader;
+
+    use ltk_meta::property::NoMeta;
+    use ltk_meta::Bin;
+
+    // 读取映射
+    let map_text = std::fs::read_to_string(map).map_err(|e| format!("读映射失败: {e}"))?;
+    let mut hash_map: HashMap<u32, u32> = HashMap::new();
+    for (i, line) in map_text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let old = u32::from_str_radix(parts.next().ok_or_else(|| format!("映射第{i}行缺 old"))?, 16)
+            .map_err(|e| format!("映射第{i}行 old 非法: {e}"))?;
+        let new = u32::from_str_radix(parts.next().ok_or_else(|| format!("映射第{i}行缺 new"))?, 16)
+            .map_err(|e| format!("映射第{i}行 new 非法: {e}"))?;
+        hash_map.insert(old, new);
+    }
+    println!("bin-edit: 映射 {} 条", hash_map.len());
+
+    // 解析 → JSON
+    let file = File::open(input).map_err(|e| format!("打开输入失败 {input:?}: {e}"))?;
+    let bin = Bin::<NoMeta>::from_reader(&mut BufReader::new(file))
+        .map_err(|e| format!("解析 bin 失败: {e}"))?;
+    let mut json = serde_json::to_value(&bin).map_err(|e| format!("序列化 JSON 失败: {e}"))?;
+
+    // 递归替换
+    let mut refs = 0usize;
+    let mut renamed = 0usize;
+    edit_json_value(&mut json, &hash_map, string_prefixes, &mut refs, &mut renamed);
+    println!("bin-edit: 对象改名 {renamed} 个，引用替换 {refs} 处");
+
+    // JSON → Bin → 写出
+    let bin2: Bin<NoMeta> =
+        serde_json::from_value(json).map_err(|e| format!("JSON 反序列化失败: {e}"))?;
+    let mut out = File::create(output).map_err(|e| format!("创建输出失败 {output:?}: {e}"))?;
+    bin2.to_writer(&mut out).map_err(|e| format!("写入 bin 失败: {e}"))?;
+    println!("OK 已写出 {output:?}");
+    Ok(())
+}
+
+/// 递归编辑 JSON：
+/// - objects map 的 key（BinHash hex 字符串）命中映射 → 换 key
+/// - kind=Hash 的属性值（u32 数字）命中 → 替换
+/// - kind=String 的属性值按前缀（等长）替换
+/// - 其余数字节点若命中映射也替换（path_hash 字段等）
+fn edit_json_value(
+    v: &mut serde_json::Value,
+    hash_map: &std::collections::HashMap<u32, u32>,
+    string_prefixes: &[String],
+    refs: &mut usize,
+    renamed: &mut usize,
+) {
+    match v {
+        serde_json::Value::Object(map) => {
+            // PropertyValueEnum 形态: {"kind": "...", "value": ...}
+            let is_prop = map.get("kind").and_then(|k| k.as_str()).is_some()
+                && map.contains_key("value");
+            // 先处理 key（objects 的 BinHash key 是 hex 字符串）
+            let keys: Vec<String> = map.keys().cloned().collect();
+            for key in keys {
+                if let Ok(num) = u32::from_str_radix(&key, 16) {
+                    if let Some(&new) = hash_map.get(&num) {
+                        let val = map.remove(&key).unwrap();
+                        map.insert(format!("{new:08x}"), val);
+                        *renamed += 1;
+                    }
+                }
+            }
+            if is_prop {
+                let kind = map.get("kind").and_then(|k| k.as_str()).unwrap_or("").to_string();
+                let value = map.get_mut("value").unwrap();
+                if kind == "Hash" {
+                    if let Some(num) = value.as_u64() {
+                        if let Some(&new) = hash_map.get(&(num as u32)) {
+                            *value = serde_json::json!(new);
+                            *refs += 1;
+                        }
+                    }
+                }
+                // String 及 EmbeddedObjectLink 等含路径字符串的值统一在
+                // 下方 String 节点分支处理
+            }
+            // 递归所有值
+            for val in map.values_mut() {
+                edit_json_value(val, hash_map, string_prefixes, refs, renamed);
+            }
+        }
+        serde_json::Value::String(s) => {
+            // 所有字符串节点（属性值、对象链接路径等）：前缀匹配则替换。
+            // 等长替换要求由调用方保证（SkinN→Skin0 均为 5 字符）。
+            for pair in string_prefixes.chunks(2) {
+                if pair.len() == 2 && s.starts_with(&pair[0]) {
+                    *s = format!("{}{}", pair[1], &s[pair[0].len()..]);
+                    *refs += 1;
+                    break;
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                edit_json_value(item, hash_map, string_prefixes, refs, renamed);
+            }
+        }
+        serde_json::Value::Number(n) => {
+            if let Some(num) = n.as_u64() {
+                if let Some(&new) = hash_map.get(&(num as u32)) {
+                    *n = serde_json::Number::from(new);
+                    *refs += 1;
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -156,7 +302,7 @@ fn bin_alias_map(
     input: &PathBuf,
     output: &PathBuf,
     map: &PathBuf,
-    _string_prefixes: &[String],
+    string_prefixes: &[String],
 ) -> Result<(), String> {
     use std::collections::HashMap;
     use std::fs::File;
@@ -210,7 +356,35 @@ fn bin_alias_map(
         bin.to_writer(&mut cursor).map_err(|e| format!("序列化失败: {e}"))?;
     }
 
-    // 3) 字节级 u32 LE 替换（属性区引用）
+    // 3) 字符串前缀替换（PROP String 值 = u16 LE 长度 + UTF-8）。
+    //    只替换以 old 开头的字符串（如 Characters/Aatrox/Skins/Skin33 → Skin0，
+    //    对象引用）；ASSETS 资源路径不以 Characters/ 开头，不受影响。
+    //    要求等长（SkinN→Skin0 均为 5 字符）。
+    let mut str_refs = 0usize;
+    for pair in string_prefixes.chunks(2) {
+        if pair.len() != 2 {
+            continue;
+        }
+        let old = pair[0].as_bytes();
+        let new = pair[1].as_bytes();
+        if old.is_empty() || old.len() != new.len() {
+            continue;
+        }
+        let mut i = 0usize;
+        while i + 2 + old.len() <= bytes.len() {
+            let len = u16::from_le_bytes([bytes[i], bytes[i + 1]]) as usize;
+            if len >= old.len() && i + 2 + len <= bytes.len()
+                && bytes[i + 2..i + 2 + old.len()] == *old
+            {
+                bytes[i + 2..i + 2 + old.len()].copy_from_slice(new);
+                str_refs += 1;
+            }
+            i += 1;
+        }
+    }
+    println!("bin-alias-map: 字符串引用替换 {str_refs} 处");
+
+    // 4) 字节级 u32 LE 替换（属性区 Hash 引用）
     let mut refs = 0usize;
     for (old, new) in &hash_map {
         let old_bytes = old.to_le_bytes();

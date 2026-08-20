@@ -99,16 +99,21 @@ class PatcherHost:
             error("C2", "补丁器启动后立即退出", returncode=rc,
                   stderr=stderr_tail.strip())
             raise PatcherError(f"补丁器启动失败（{hint}，code={rc}）")
-        # 发送配置序列（对齐 ltk-manager protocol.rs：loglevel=32 debug / flags=0 / prefix）
+        # 发送配置序列（对齐 ltk-manager protocol.rs）
+        # loglevel: 32=Debug / 16=Info
+        # flags: 4 = OPT_OUT_AH_V1 —— AH（anti-skinhack）扫描失败降级为警告而非
+        #        禁用 overlay（国服 ACE 环境下 WAD 扫描被 c0000229 阻止，必须开）
         log_level = 32 if self.debug else 16
+        flags = 4
         prefix = str(self.overlay_dir).rstrip("\\/") + "\\"
         commands = (
             f"config loglevel {log_level}\n"
-            "config flags 0\n"
+            f"config flags {flags}\n"
             f"config prefix {prefix}\n"
             "start scan\n"
         )
-        log("C2", "发送配置", commands=commands.replace("\n", " | "))
+        log("C2", "发送配置", commands=commands.replace("\n", " | "),
+            note="flags=4(OPT_OUT_AH_V1) AH 扫描失败降级为警告")
         try:
             self.proc.stdin.write(commands)
             self.proc.stdin.flush()

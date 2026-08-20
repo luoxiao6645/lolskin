@@ -160,9 +160,18 @@ class SkinFloater:
         self.status_label_color(color or MUTED)
 
     def _apply_state(self, state: ChampSelectState) -> None:
-        if not state.in_champ_select or state.champion_id <= 0:
+        if not state.in_champ_select:
             self.champion_id = 0
             self._set_idle()
+            return
+        if state.champion_id <= 0:
+            # 在选人阶段但英雄未确定（训练营常见：未选英雄/随机）
+            self.champion_id = 0
+            self.title_var.set("YsnSkin-Learn · 选人阶段")
+            self.skin_info_var.set("请先选择英雄（锁定后自动加载皮肤列表）")
+            self.skin_list.delete(0, tk.END)
+            self.swap_btn["state"] = "disabled"
+            self.status_var.set("等待选择英雄…")
             return
         self.champion_id = state.champion_id
         self.current_skin_id = state.selected_skin_id
@@ -279,18 +288,33 @@ class SkinFloater:
     def _poll_loop(self, stop: threading.Event) -> None:
         """持续轮询：未连接客户端时自动重连（不依赖启动时状态）。"""
         import time as _time
+        from pathlib import Path
+
+        log_path = Path(__file__).resolve().parent.parent.parent / "session" / "floater.log"
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_file = open(log_path, "a", encoding="utf-8")
+        except OSError:
+            log_file = None
+
+        def log_line(msg: str) -> None:
+            ts = _time.strftime("%H:%M:%S")
+            print(f"[{ts}][floater] {msg}", flush=True)
+            if log_file:
+                log_file.write(f"[{ts}][floater] {msg}\n")
+                log_file.flush()
 
         gameflow = self.gameflow
         last_key = None
         while not stop.is_set():
             if gameflow is None:
-                self._set_status("未连接客户端，重试中…")
+                log_line("未连接客户端，重试中…")
                 try:
                     from ..lcu import discover
                     lockfile = discover(Path(r"E:\Program Files (x86)\英雄联盟(26)"))
                     gameflow = Gameflow(RiotClient(lockfile))
                     self.gameflow = gameflow
-                    self._set_status("已连接客户端，等待选人阶段")
+                    log_line("已连接客户端")
                 except Exception:
                     stop.wait(3)
                     continue
@@ -299,14 +323,14 @@ class SkinFloater:
                 key = (state.phase, state.champion_id, state.selected_skin_id)
                 if key != last_key:
                     last_key = key
+                    log_line(f"状态变化: phase={state.phase} in_cs={state.in_champ_select} "
+                             f"champion={state.champion_id} skin={state.selected_skin_id}")
                     self.on_state(state)
-                    if not state.in_champ_select:
-                        self._set_status(f"等待选人阶段…（当前 {state.phase}）")
             except Exception:
                 gameflow = None
                 self.gameflow = None
                 continue
-            stop.wait(1)
+            stop.wait(0.5)
 
 
 def main() -> int:

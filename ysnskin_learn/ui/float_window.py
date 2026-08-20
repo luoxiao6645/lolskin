@@ -243,10 +243,14 @@ class SkinFloater:
                 overlay=str(result.overlay_root))
             self._set_status(f"构建完成 {time.monotonic() - t0:.0f}s，启动补丁器…")
             # 2) 提权补丁器（UAC 弹窗首次需授权；国服游戏以管理员运行）
+            #    用 ASCII 路径副本（DLL 对中文路径兼容性差）+ debug 日志（DLL 内部 tracing）
+            from ..overlay import SkinSwapper as _SS
+            overlay_ascii = _SS.copy_to_ascii(result.overlay_root)
             from ..patcher import PatcherHost
-            host = PatcherHost(result.overlay_root, elevate=True)
+            host = PatcherHost(overlay_ascii, elevate=True, debug=True)
             host.start()
-            log("SWAP", "补丁器已启动，等待游戏进程", pid=host.proc.pid if host.proc else None)
+            log("SWAP", "补丁器已启动，等待游戏进程", pid=host.proc.pid if host.proc else None,
+                overlay=str(overlay_ascii))
             self._set_status("补丁器就位！现在可以点【开始】进入游戏")
             # 3) 真实对局时同步 PATCH LCU（训练营 PATCH 无效，跳过影响）
             if self.gameflow is not None:

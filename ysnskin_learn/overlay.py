@@ -115,6 +115,28 @@ class SkinSwapper:
             event = host.wait_for_state("injected", timeout=timeout)
             return event.detail
 
+    @staticmethod
+    def copy_to_ascii(overlay_root: str | Path, dst: str | Path = r"C:\ltk-overlay-current") -> Path:
+        """把覆盖目录复制到纯 ASCII 路径（MinGW 系工具/DLL 对中文路径兼容性差）。
+
+        覆盖 WAD 可能上百 MB，仅当目标不存在或源更新时复制。
+        """
+        from .diag import log
+
+        src = Path(overlay_root)
+        dst = Path(dst)
+        src_wad = next(src.rglob("*.wad.client"), None)
+        dst_wad = dst / src_wad.relative_to(src) if src_wad else None
+        if dst_wad is not None and dst_wad.is_file():
+            if src_wad is not None and src_wad.stat().st_mtime <= dst_wad.stat().st_mtime:
+                log("COPY", "ASCII 副本已是最新，跳过复制", dst=str(dst))
+                return dst
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+        log("COPY", "已复制到 ASCII 路径", dst=str(dst))
+        return dst
+
     def swap(self, champion: str, skin_num: int,
              inject: bool = True) -> SwapResult:
         """一键换肤：构建 + 注入（游戏须在运行）。"""

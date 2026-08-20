@@ -34,10 +34,11 @@ class PatcherHost:
     """驱动 ltk_patcher_host.exe 的 runoverlay 模式。"""
 
     def __init__(self, overlay_dir: str | Path, patcher_host: str | Path = PATCHER_HOST,
-                 elevate: bool = False):
+                 elevate: bool = False, debug: bool = False):
         self.overlay_dir = Path(overlay_dir)
         self.patcher_host = Path(patcher_host)
         self.elevate = elevate
+        self.debug = debug
         self.proc: subprocess.Popen | None = None
         self._events: list[PatcherEvent] = []
         self._logs: list[str] = []          # stderr 日志行（含 DLL 内部 tracing）
@@ -60,6 +61,8 @@ class PatcherHost:
         args = [str(self.patcher_host)]
         if self.elevate:
             args.append("--elevate")
+        if self.debug:
+            args += ["--opts", "debugpatcher"]  # 提升日志级别，输出 DLL 内部 tracing
         args += ["runoverlay", str(self.overlay_dir)]
         log("C1", "启动补丁器", exe=str(self.patcher_host), elevate=self.elevate,
             overlay=str(self.overlay_dir))

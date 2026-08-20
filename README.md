@@ -7,7 +7,9 @@
 > 本项目与 Riot Games、腾讯、无任何关联。
 
 ---
-![展示](https://github.com/luoxiao6645/lolskin/blob/main/PixPin_2026-08-21_01-31-52.png)(https://github.com/luoxiao6645/lolskin/blob/main/PixPin_2026-08-21_01-32-08.png)(https://github.com/luoxiao6645/lolskin/blob/main/PixPin_2026-08-21_01-35-15.png)
+![展示](https://github.com/luoxiao6645/lolskin/blob/main/PixPin_2026-08-21_01-31-52.png)
+![](https://github.com/luoxiao6645/lolskin/blob/main/PixPin_2026-08-21_01-32-08.png)
+![](https://github.com/luoxiao6645/lolskin/blob/main/PixPin_2026-08-21_01-35-15.png)
 ## 为什么做这个项目
 
 学习项目架构（逆向结论，详见 [docs/01-architecture.md](docs/01-architecture.md)）由四层组成：

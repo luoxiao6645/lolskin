@@ -98,6 +98,22 @@ class TestGameflow(unittest.TestCase):
         gf = self._state()
         self.assertFalse(gf.select_skin(0))
 
+    def test_champ_select_state_cell_zero(self):
+        """回归：localPlayerCellId=0（训练营/人机）时 cellId=0 必须能匹配。"""
+        client = mock.MagicMock()
+        session = {
+            "localPlayerCellId": 0,
+            "myTeam": [{"cellId": 0, "championId": 0, "championPickIntent": 103,
+                        "selectedSkinId": 0}],
+        }
+        client.get_json.side_effect = lambda path: (
+            "ChampSelect" if path.endswith("gameflow-phase") else session
+        )
+        state = Gameflow(client).champ_select_state()
+        self.assertTrue(state.in_champ_select)
+        self.assertEqual(state.champion_id, 103)
+        self.assertEqual(state.local_cell_id, 0)
+
     def test_poller_calls_on_change(self):
         gf = self._state()
         poller = PhasePoller(gf, interval=0.01)

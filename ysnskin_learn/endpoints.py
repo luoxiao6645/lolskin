@@ -44,15 +44,17 @@ class Gameflow:
         except Exception:
             # 阶段刚切换时会话可能瞬时不可用，与 lcu-bridge.js 一致：按无会话处理
             return ChampSelectState(phase, 0, 0, 0, False)
-        local_cell = int(session.get("localPlayerCellId") or 0)
+        local_cell = session.get("localPlayerCellId")
         champion_id = 0
         selected_skin_id = 0
         for member in session.get("myTeam") or []:
-            if int(member.get("cellId") or -1) == local_cell:
+            # 注意：cellId 可能为 0（训练营/人机对局 localPlayerCellId=0），
+            # 不能用 `or -1` 之类的 falsy 兜底——0 是合法值
+            if member.get("cellId") is not None and int(member.get("cellId")) == int(local_cell or -1):
                 champion_id = int(member.get("championId") or member.get("championPickIntent") or 0)
                 selected_skin_id = int(member.get("selectedSkinId") or 0)
                 break
-        return ChampSelectState(phase, champion_id, selected_skin_id, local_cell, True)
+        return ChampSelectState(phase, champion_id, selected_skin_id, int(local_cell or 0), True)
 
     def select_skin(self, skin_id: int) -> bool:
         """PATCH 选人会话，把本地玩家的皮肤改为 skin_id（LCU 假选择）。
@@ -89,7 +91,8 @@ class Gameflow:
         walk(actions)
         candidates = [
             a for a in flat
-            if int(a.get("actorCellId") or -1) == local_cell
+            if a.get("actorCellId") is not None
+            and int(a.get("actorCellId")) == int(local_cell or -1)
             and int(a.get("id") or 0) > 0
             and (not a.get("type") or str(a["type"]).lower() == "pick")
         ]

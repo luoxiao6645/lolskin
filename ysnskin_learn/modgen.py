@@ -50,13 +50,13 @@ def build_skin_swap_mod(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
 
-    # 最小 mod.config.json（ltk_mod_project::ModProject 必填字段）
+    # 最小 mod.config.json（ltk_mod_project::ModProject 必填字段；authors 为字符串数组）
     config = {
         "name": f"skin-swap-{champion}-{skin_num}",
-        "display-name": f"{champion} Skin{skin_num} -> Skin0",
+        "display_name": f"{champion} Skin{skin_num} -> Skin0",
         "version": "1.0.0",
         "description": f"auto-generated skin swap: show skin{skin_num} as skin0 ({champion})",
-        "authors": [{"name": "YsnSkin-Learn"}],
+        "authors": ["YsnSkin-Learn"],
     }
     (mod_root / "mod.config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"

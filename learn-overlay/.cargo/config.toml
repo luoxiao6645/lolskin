@@ -1,0 +1,6 @@
+# MinGW ld 对非 ASCII（中文）路径有兼容性问题：构建产物固定到 ASCII 目录
+[build]
+target-dir = "C:\\ltk-target"
+
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\w64devkit\\w64devkit\\bin\\gcc.exe"

@@ -52,6 +52,13 @@ def pick_skin(catalog: SkinCatalog, champion_id: int, current_skin: int = 0) -> 
             print("无效序号")
 
 
+def find_client_root() -> Path:
+    env_dir = __import__("os").environ.get("YSNSKIN_LEARN_CLIENT_DIR", "").strip()
+    if env_dir:
+        return Path(env_dir)
+    return Path(r"E:\Program Files (x86)\英雄联盟(26)")
+
+
 def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -65,6 +72,7 @@ def main() -> int:
 
     catalog = SkinCatalog()
     swapper = SkinSwapper()
+    client_root = find_client_root()
 
     champion_id = 0
     skin_id = 0
@@ -72,11 +80,10 @@ def main() -> int:
 
     # 连接 LCU（构建不需要，PATCH 需要；客户端离线时降级）
     try:
-        lockfile = discover(Path(r"E:\Program Files (x86)\英雄联盟(26)"))
+        lockfile = discover(client_root)
         client = RiotClient(lockfile)
     except LcuError:
-        if not build_only and not no_patch:
-            pass  # 继续；构建不依赖客户端
+        pass
     if client is not None:
         try:
             state = Gameflow(client).champ_select_state()

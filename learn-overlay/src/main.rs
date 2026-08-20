@@ -47,6 +47,12 @@ fn utf8(p: &PathBuf, what: &str) -> Result<String, String> {
 }
 
 fn main() -> Result<(), String> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Build {
@@ -70,7 +76,6 @@ fn main() -> Result<(), String> {
                 id: "skin-swap".to_string(),
                 content: Box::new(content),
                 enabled_layers: None,
-                content_fingerprint: None,
             };
             builder.set_enabled_mods(vec![enabled]);
 

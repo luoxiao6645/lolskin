@@ -18,7 +18,15 @@ from .modgen import build_swap_for_skin
 from .patcher import PatcherHost
 
 DEFAULT_GAME_DIR = Path(r"E:\Program Files (x86)\英雄联盟(26)\Game")
-LEARN_OVERLAY = Path(__file__).resolve().parent.parent / "learn-overlay" / "target" / "release" / "learn-overlay.exe"
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# 优先本地 target；MinGW 中文路径问题时构建产物在 C:\ltk-target
+LEARN_OVERLAY = next(
+    (p for p in (
+        _PROJECT_ROOT / "learn-overlay" / "target" / "release" / "learn-overlay.exe",
+        Path(r"C:\ltk-target\release\learn-overlay.exe"),
+    ) if p.is_file()),
+    _PROJECT_ROOT / "learn-overlay" / "target" / "release" / "learn-overlay.exe",
+)
 
 
 @dataclass

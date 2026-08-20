@@ -1,16 +1,16 @@
-# YsnSkin-Learn
+# lol换肤学习项目
 
-一个**个人学习项目**：基于对 `YsnSkin-V0.1.50` 发布包（[`E:\下载\YsnSkin-V0.1.50`](../YsnSkin-V0.1.50)）的完整逆向分析，用 **Python 3.11（零第三方依赖起步）** 从零实现一个《英雄联盟》换肤工具的原型。
+一个**学习项目**：基于对项目https://github.com/LeagueToolkit/ltk-manager)](https://github.com/LeagueToolkit/ltk-manager)，用 **Python 3.11（零第三方依赖起步）** 从零实现一个《英雄联盟》换肤工具的原型。
 
 > ⚠️ **声明**：本项目仅用于个人学习与技术研究，**不用于商业用途**。
 > 使用第三方工具修改游戏违反 Riot Games / 腾讯的服务条款，存在封号风险，请自行承担后果。
-> 本项目与 Riot Games、腾讯、YsnSkin 无任何关联。
+> 本项目与 Riot Games、腾讯、无任何关联。
 
 ---
 
 ## 为什么做这个项目
 
-YsnSkin 的架构（逆向结论，详见 [docs/01-architecture.md](docs/01-architecture.md)）由四层组成：
+学习项目架构（逆向结论，详见 [docs/01-architecture.md](docs/01-architecture.md)）由四层组成：
 
 ```
 选择层（悬浮窗 / Pengu 插件） → 编排层（C# 客户端 + WebSocket 桥）
@@ -18,9 +18,9 @@ YsnSkin 的架构（逆向结论，详见 [docs/01-architecture.md](docs/01-arch
      → 注入层（ltk_patcher_host.exe + ltk_patcher_dll.dll：游戏内 WAD 重定向）
 ```
 
-本项目逐层复刻这条链路，**每一层都自己实现并用文档记录原理**：
+本项目复刻这条链路，**每一层都自己实现并用文档记录原理**：
 
-| 层 | YsnSkin 的实现 | 本项目的实现 | 状态 |
+|  本项目的实现 | 状态 |
 |---|---|---|---|
 | 选择层（模式一） | WPF 悬浮窗 + LCU 轮询 | `ui/float_window.py` tkinter 悬浮窗 + `tools/floater.py` | ✅ |
 | LCU 集成 | C# HttpClient + lockfile | `ysnskin_learn/lcu.py` + `endpoints.py` | ✅ |
@@ -32,7 +32,7 @@ YsnSkin 的架构（逆向结论，详见 [docs/01-architecture.md](docs/01-arch
 | 编排层 | C# 状态机 | `ysnskin_learn/overlay.py` + `tools/skin_swap.py` | ✅ |
 | 特殊皮肤适配 | 52 项能力（闭源） | 不做全量适配（简单皮肤先行） | 记录 |
 
-关键技术细节全部来自对 YsnSkin 二进制、官方开源项目（ltk-manager / league-mod / wadtools）的逆向与阅读，笔记见 [docs/](docs/)。
+关键技术细节全部来自官方开源项目（ltk-manager / league-mod / wadtools）的逆向与阅读)。
 
 ## 快速开始
 

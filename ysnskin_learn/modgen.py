@@ -168,6 +168,26 @@ def build_skin_swap_mod(
     # 全对象别名：skins/skinN.bin（根对象 + Particles 子对象）→ skin0
     data, skin_mapping = alias_bin_file(learn_overlay, data, champion, skin_num, "skins")
 
+    # 与原版 base skin0.bin 合并：保留 base 特效对象（Aatrox_Base_* 等）——
+    # base 皮肤编号加载时按固定名字引用它们，缺失会导致特效空白；
+    # 根对象等冲突项由 skinN 别名版覆盖（模型/特效走皮肤 N）。
+    base_skin0 = wad.read_path(f"data/characters/{champion}/skins/skin0.bin")
+    if base_skin0 is not None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            base_file = tmp / "base.bin"
+            override_file = tmp / "override.bin"
+            merged_file = tmp / "merged.bin"
+            base_file.write_bytes(base_skin0)
+            override_file.write_bytes(data)
+            proc = subprocess.run(
+                [str(learn_overlay), "bin-merge", str(base_file), str(override_file),
+                 str(merged_file)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=120)
+            if proc.returncode == 0:
+                data = merged_file.read_bytes()
+
     mod_root = Path(out_mod_dir)
     wad_name = f"{champion.capitalize()}.wad.client"
 

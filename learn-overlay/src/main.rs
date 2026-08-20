@@ -91,6 +91,17 @@ enum Cmd {
         /// 输出 JSON 文件
         output: PathBuf,
     },
+    /// 合并两个 bin 的对象表（base 先、override 后，冲突时 override 胜），
+    /// dependencies 取并集。用于：base 特效对象 + skinN 别名对象合入 skin0.bin，
+    /// 使 base 编号加载时 base 特效对象仍存在（避免特效空白）。
+    BinMerge {
+        /// 基础 bin（如原版 skin0.bin）
+        base: PathBuf,
+        /// 覆盖 bin（如 skinN 别名版）
+        override_bin: PathBuf,
+        /// 输出 bin
+        output: PathBuf,
+    },
 }
 
 fn utf8(p: &PathBuf, what: &str) -> Result<String, String> {
@@ -170,7 +181,54 @@ fn main() -> Result<(), String> {
             string_prefixes,
         } => bin_edit(&input, &output, &map, &string_prefixes),
         Cmd::BinDump { input, output } => bin_dump(&input, &output),
+        Cmd::BinMerge {
+            base,
+            override_bin,
+            output,
+        } => bin_merge(&base, &override_bin, &output),
     }
+}
+
+/// bin-merge：合并两个 bin（对象表 union，override 胜；dependencies 并集）。
+fn bin_merge(base: &PathBuf, override_bin: &PathBuf, output: &PathBuf) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::BufReader;
+
+    use ltk_meta::property::NoMeta;
+    use ltk_meta::Bin;
+
+    let f1 = File::open(base).map_err(|e| format!("打开 base 失败 {base:?}: {e}"))?;
+    let bin1 = Bin::<NoMeta>::from_reader(&mut BufReader::new(f1))
+        .map_err(|e| format!("解析 base 失败: {e}"))?;
+    let f2 = File::open(override_bin).map_err(|e| format!("打开 override 失败 {override_bin:?}: {e}"))?;
+    let bin2 = Bin::<NoMeta>::from_reader(&mut BufReader::new(f2))
+        .map_err(|e| format!("解析 override 失败: {e}"))?;
+
+    let mut merged = bin1;
+    let base_count = merged.objects.len();
+    let override_count = bin2.objects.len();
+    for (hash, obj) in bin2.objects {
+        merged.objects.insert(hash, obj); // override 胜
+    }
+    for dep in bin2.dependencies {
+        if !merged.dependencies.contains(&dep) {
+            merged.dependencies.push(dep);
+        }
+    }
+    println!(
+        "bin-merge: base={} override={} -> merged={} 对象，deps={}",
+        base_count,
+        override_count,
+        merged.objects.len(),
+        merged.dependencies.len()
+    );
+
+    let mut out = File::create(output).map_err(|e| format!("创建输出失败 {output:?}: {e}"))?;
+    merged
+        .to_writer(&mut out)
+        .map_err(|e| format!("写入失败: {e}"))?;
+    println!("OK 已写出 {output:?}");
+    Ok(())
 }
 
 /// bin-dump：解析 bin → 美化 JSON 写出（属性引用链完整可见）。

@@ -1,29 +1,95 @@
-"""皮肤交换 mod 生成器：把目标皮肤 SkinN 的 bin 替换为 Skin0 的覆盖。
+"""皮肤交换 mod 生成器：把目标皮肤 SkinN 的对象图别名到 Skin0 的覆盖。
 
-原理（仿照 YsnSkin 的 entry-alias，粗粒度版）：
-  游戏加载英雄时读取 data/characters/<英雄>/skins/skin0.bin 及其链接的
-  bin（动画图 / Multi_Skins 集合）。把 skinN.bin 原样作为 skin0.bin 的
-  覆盖放入 mod，其链接保持指向 SkinN 的资源（原版 WAD 中全部存在），
-  游戏便会按 SkinN 的完整对象图加载 —— 模型/纹理/粒子/音效随之切换。
+原理（对齐 YsnSkin 的 entry-alias）：
+  游戏加载英雄时读取 data/characters/<英雄>/skins/skin0.bin 及其链接的 bin。
+  把 skinN.bin 的**全部对象**（根对象 + Particles 等子对象）路径别名到 skin0
+  （PROP 只存 path_hash；对象引用为 Hash 值，字节级替换）：
+    - 模型/贴图等资源路径保持指向 skinN（原版 WAD 中全部存在）
+    - 粒子特效对象（SkinN/Particles/*）改名 Skin0/Particles/* 使游戏能按
+      skin0 命名空间查到特效
+  动画图 bin（Animations/SkinN.bin）同样别名到 Animations/skin0.bin。
 
 产物：ltk 生态的 mod 目录（ltk_overlay::content::FsModContent 兼容）：
   mod.config.json
-  content/base/Champions.wad.client/data/characters/<x>/skins/skin0.bin
+  content/base/<英雄>.wad.client/data/characters/<x>/skins/skin0.bin
+  content/base/<英雄>.wad.client/data/characters/<x>/animations/skin0.bin
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
+import tempfile
 from pathlib import Path
 
 from .wad import Wad
 
 DEFAULT_GAME_DIR = Path(r"E:\Program Files (x86)\英雄联盟(26)\Game")
+DEFAULT_BINHASHES = Path(__file__).resolve().parent.parent / "data" / "hashes" / "binhashes-2026-08-14.lhdb"
 
 
-def champion_key(alias: str) -> str:
-    """英雄别名转小写（目录名形式，如 'Ahri' -> 'ahri'）。"""
-    return alias.lower()
+def fnv1a32(data: bytes) -> int:
+    """ltk BinHash：FNV-1a 32（小写路径）。与 binhashes 表验证一致。"""
+    h = 0x811C9DC5
+    for b in data:
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
+
+
+def build_alias_map(object_hashes: list[int], old_prefix: str, new_prefix: str,
+                    binhashes_db) -> list[tuple[int, int]]:
+    """对象路径含 old_prefix 的 → 前缀替换为 new_prefix 的映射。"""
+    mapping = []
+    for h in object_hashes:
+        path = binhashes_db.get(h)
+        if path and path.lower().startswith(old_prefix):
+            new_path = new_prefix + path[len(old_prefix):]
+            mapping.append((h, fnv1a32(new_path.lower().encode("utf-8"))))
+    return mapping
+
+
+def alias_bin_file(learn_overlay: str | Path, data: bytes, champion: str,
+                   skin_num: int, kind: str) -> bytes:
+    """对一个 bin 字节流执行全对象别名（skins 或 animations）。kind: 'skins'|'animations'。
+
+    流程：bin-list 拿对象 hash → binhashes 反查路径 → 生成映射 → bin-alias-map。
+    """
+    from .lhdb import Lhdb
+
+    old_prefix = f"characters/{champion}/{kind}/skin{skin_num}"
+    new_prefix = f"characters/{champion}/{kind}/skin0"
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        raw = tmp / "raw.bin"
+        raw.write_bytes(data)
+        # 1) 对象 hash 列表
+        proc = subprocess.run([str(learn_overlay), "bin-list", str(raw)],
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=60)
+        if proc.returncode != 0:
+            raise RuntimeError(f"bin-list 失败: {proc.stdout} {proc.stderr}")
+        hashes = [int(ln.split()[1], 16) for ln in proc.stdout.splitlines()
+                  if ln.startswith("object ")]
+        if not hashes:
+            return b""  # 无对象（空 bin），跳过
+        # 2) binhashes 反查
+        db = Lhdb.open(DEFAULT_BINHASHES)
+        mapping = build_alias_map(hashes, old_prefix, new_prefix, db)
+        if not mapping:
+            raise RuntimeError(
+                f"未找到含 {old_prefix} 的对象（binhashes 表可能过期）")
+        # 3) 执行别名
+        map_file = tmp / "map.txt"
+        map_file.write_text(
+            "\n".join(f"{o:08x} {n:08x}" for o, n in mapping), encoding="utf-8")
+        out = tmp / "out.bin"
+        proc = subprocess.run(
+            [str(learn_overlay), "bin-alias-map", str(raw), str(out), str(map_file)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120)
+        if proc.returncode != 0:
+            raise RuntimeError(f"bin-alias-map 失败: {proc.stdout} {proc.stderr}")
+        return out.read_bytes()
 
 
 def build_skin_swap_mod(
@@ -49,34 +115,35 @@ def build_skin_swap_mod(
     if data is None:
         raise FileNotFoundError(f"WAD 中不存在 {src_path}")
 
-    # bin-alias：根对象 characters/<x>/skins/skinN -> skin0
-    old_path = f"characters/{champion}/skins/skin{skin_num}"
-    new_path = f"characters/{champion}/skins/skin0"
-    if learn_overlay is not None and Path(learn_overlay).is_file():
-        with tempfile.TemporaryDirectory() as tmp:
-            raw = Path(tmp) / "raw.bin"
-            aliased = Path(tmp) / "aliased.bin"
-            raw.write_bytes(data)
-            proc = subprocess.run(
-                [str(learn_overlay), "bin-alias", str(raw), str(aliased),
-                 old_path, new_path],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=60,
-            )
-            if proc.returncode != 0:
-                raise RuntimeError(f"bin-alias 失败: {proc.stdout} {proc.stderr}")
-            data = aliased.read_bytes()
-    else:
-        # 无 learn-overlay（纯 Python 环境）：退化提示（构建仍需 learn-overlay）
+    if learn_overlay is None or not Path(learn_overlay).is_file():
         raise RuntimeError("bin-alias 需要 learn-overlay（先 cargo build --release）")
+
+    # 全对象别名：skins/skinN.bin（根对象 + Particles 子对象）→ skin0
+    data = alias_bin_file(learn_overlay, data, champion, skin_num, "skins")
+
+    mod_root = Path(out_mod_dir)
+    wad_name = f"{champion.capitalize()}.wad.client"
 
     # 覆盖目标路径：skin0.bin（游戏加载的入口）
     dst_rel = Path("data") / "characters" / champion / "skins" / "skin0.bin"
-    wad_name = f"{champion.capitalize()}.wad.client"
-    mod_root = Path(out_mod_dir)
     target = mod_root / "content" / "base" / wad_name / dst_rel
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
+
+    # 动画图 bin：Animations/skinN.bin → Animations/skin0.bin（存在时）
+    anim_src = f"data/characters/{champion}/animations/skin{skin_num}.bin"
+    anim_data = wad.read_path(anim_src)
+    if anim_data is not None:
+        try:
+            anim_data = alias_bin_file(learn_overlay, anim_data, champion,
+                                       skin_num, "animations")
+            anim_target = (mod_root / "content" / "base" / wad_name /
+                           "data" / "characters" / champion / "animations" / "skin0.bin")
+            anim_target.parent.mkdir(parents=True, exist_ok=True)
+            anim_target.write_bytes(anim_data)
+        except RuntimeError as exc:
+            # 动画别名失败不阻塞皮肤（动画回退 base）
+            print(f"[modgen][警告] 动画 bin 别名失败（回退 base 动画）: {exc}", flush=True)
 
     # 最小 mod.config.json（ltk_mod_project::ModProject 必填字段；authors 为字符串数组）
     # 注意：必须显式声明 layers —— ltk_overlay 0.5.2 的收集逻辑直接遍历

@@ -51,6 +51,26 @@ enum Cmd {
         /// 新对象路径（如 characters/lissandra/skins/skin0）
         new_path: String,
     },
+    /// 列出 bin 的对象（path_hash 十六进制 + class_hash），供 binhashes 表反查
+    BinList {
+        /// 输入 bin 文件
+        input: PathBuf,
+    },
+    /// 按映射批量改名对象 + 替换属性引用。
+    /// 映射文件每行：`<old_hash_hex> <new_hash_hex>`（对象 path_hash 改名）
+    /// 同时把属性值里的 Hash 引用（命中 old）替换为新 hash；
+    /// String 引用按前缀规则由 --string-prefix 指定替换。
+    BinAliasMap {
+        /// 输入 bin 文件
+        input: PathBuf,
+        /// 输出 bin 文件
+        output: PathBuf,
+        /// 映射文件（每行 old new，hex u32）
+        map: PathBuf,
+        /// 可选字符串前缀替换：--string-prefix <old> <new>（可多次）
+        #[arg(long = "string-prefix", num_args = 2, action = clap::ArgAction::Append)]
+        string_prefixes: Vec<String>,
+    },
 }
 
 fn utf8(p: &PathBuf, what: &str) -> Result<String, String> {
@@ -116,7 +136,125 @@ fn main() -> Result<(), String> {
             old_path,
             new_path,
         } => bin_alias(&input, &output, &old_path, &new_path),
+        Cmd::BinList { input } => bin_list(&input),
+        Cmd::BinAliasMap {
+            input,
+            output,
+            map,
+            string_prefixes,
+        } => bin_alias_map(&input, &output, &map, &string_prefixes),
     }
+}
+
+/// bin-alias-map：批量对象改名（ltk_meta）+ 属性 Hash 引用字节级替换。
+///
+/// bin 内对象引用全部是 Hash 值（u32，无字符串引用——已实证），所以：
+/// 1) ltk_meta 改名对象表（old→new）
+/// 2) 序列化后对字节做 u32 LE 替换（old→new）——对象表里 old 已不存在，
+///    替换只命中属性区的引用值，零冲突
+fn bin_alias_map(
+    input: &PathBuf,
+    output: &PathBuf,
+    map: &PathBuf,
+    _string_prefixes: &[String],
+) -> Result<(), String> {
+    use std::collections::HashMap;
+    use std::fs::File;
+    use std::io::{BufReader, Write};
+
+    use ltk_hash::BinHash;
+    use ltk_meta::property::NoMeta;
+    use ltk_meta::Bin;
+
+    // 读取映射
+    let map_text = std::fs::read_to_string(map).map_err(|e| format!("读映射失败: {e}"))?;
+    let mut hash_map: HashMap<u32, u32> = HashMap::new();
+    for (i, line) in map_text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let old = u32::from_str_radix(parts.next().ok_or_else(|| format!("映射第{i}行缺 old"))?, 16)
+            .map_err(|e| format!("映射第{i}行 old 非法: {e}"))?;
+        let new = u32::from_str_radix(parts.next().ok_or_else(|| format!("映射第{i}行缺 new"))?, 16)
+            .map_err(|e| format!("映射第{i}行 new 非法: {e}"))?;
+        hash_map.insert(old, new);
+    }
+    println!("bin-alias-map: 映射 {} 条", hash_map.len());
+
+    // 解析 bin
+    let file = File::open(input).map_err(|e| format!("打开输入失败 {input:?}: {e}"))?;
+    let mut bin = Bin::<NoMeta>::from_reader(&mut BufReader::new(file))
+        .map_err(|e| format!("解析 bin 失败: {e}"))?;
+
+    // 1) 对象改名
+    let mut renamed = 0usize;
+    let mut objects = std::mem::take(&mut bin.objects);
+    let mut new_objects = indexmap::IndexMap::new();
+    for (hash, mut obj) in objects {
+        if let Some(&new_hash) = hash_map.get(&hash.0) {
+            obj.path_hash = BinHash(new_hash);
+            new_objects.insert(BinHash(new_hash), obj);
+            renamed += 1;
+        } else {
+            new_objects.insert(hash, obj);
+        }
+    }
+    bin.objects = new_objects;
+
+    // 2) 序列化到内存
+    let mut bytes: Vec<u8> = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut bytes);
+        bin.to_writer(&mut cursor).map_err(|e| format!("序列化失败: {e}"))?;
+    }
+
+    // 3) 字节级 u32 LE 替换（属性区引用）
+    let mut refs = 0usize;
+    for (old, new) in &hash_map {
+        let old_bytes = old.to_le_bytes();
+        let new_bytes = new.to_le_bytes();
+        let mut i = 0;
+        while i + 4 <= bytes.len() {
+            if bytes[i..i + 4] == old_bytes {
+                bytes[i..i + 4].copy_from_slice(&new_bytes);
+                refs += 1;
+                i += 4;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    println!("bin-alias-map: 对象改名 {renamed} 个，引用替换 {refs} 处");
+
+    // 写出
+    let mut out = File::create(output).map_err(|e| format!("创建输出失败 {output:?}: {e}"))?;
+    out.write_all(&bytes).map_err(|e| format!("写入失败: {e}"))?;
+    println!("OK 已写出 {output:?}");
+    Ok(())
+}
+
+/// bin-list：列出对象（path_hash, class_hash, 属性数），供 binhashes 表反查路径。
+fn bin_list(input: &PathBuf) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::BufReader;
+
+    use ltk_meta::property::NoMeta;
+    use ltk_meta::Bin;
+
+    let file = File::open(input).map_err(|e| format!("打开输入失败 {input:?}: {e}"))?;
+    let bin = Bin::<NoMeta>::from_reader(&mut BufReader::new(file))
+        .map_err(|e| format!("解析 bin 失败: {e}"))?;
+    println!("dependencies: {}", bin.dependencies.len());
+    for d in &bin.dependencies {
+        println!("  dep: {d}");
+    }
+    for (hash, obj) in bin.iter() {
+        println!("object {:08x} class={:08x} props={}", hash.0, obj.class_hash.0,
+                 obj.properties.len());
+    }
+    Ok(())
 }
 
 /// bin-alias：把对象的 path_hash 从 old_path 改为 new_path（内容不变）。

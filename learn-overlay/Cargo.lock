@@ -912,6 +912,7 @@ name = "learn-overlay"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "indexmap",
  "ltk_hash",
  "ltk_meta",
  "ltk_overlay",

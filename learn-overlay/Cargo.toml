@@ -10,5 +10,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ltk_overlay = "0.5.2"
 ltk_meta = "0.6"
 ltk_hash = "0.4.0"
+indexmap = "2.14.0"
 
 

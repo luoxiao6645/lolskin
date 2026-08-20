@@ -242,9 +242,7 @@ class SkinFloater:
 
     def run(self) -> None:
         stop = threading.Event()
-        if self.gameflow is not None:
-            poller = PhasePoller(self.gameflow)
-            threading.Thread(target=poller.run, args=(self.on_state, stop), daemon=True).start()
+        threading.Thread(target=self._poll_loop, args=(stop,), daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", lambda: (stop.set(), self.root.destroy()))
         try:
             self.root.mainloop()
@@ -252,6 +250,38 @@ class SkinFloater:
             pass
         finally:
             stop.set()
+
+    def _poll_loop(self, stop: threading.Event) -> None:
+        """持续轮询：未连接客户端时自动重连（不依赖启动时状态）。"""
+        import time as _time
+
+        gameflow = self.gameflow
+        last_key = None
+        while not stop.is_set():
+            if gameflow is None:
+                self._set_status("未连接客户端，重试中…")
+                try:
+                    from ..lcu import discover
+                    lockfile = discover(Path(r"E:\Program Files (x86)\英雄联盟(26)"))
+                    gameflow = Gameflow(RiotClient(lockfile))
+                    self.gameflow = gameflow
+                    self._set_status("已连接客户端，等待选人阶段")
+                except Exception:
+                    stop.wait(3)
+                    continue
+            try:
+                state = gameflow.champ_select_state()
+                key = (state.phase, state.champion_id, state.selected_skin_id)
+                if key != last_key:
+                    last_key = key
+                    self.on_state(state)
+                if not state.in_champ_select:
+                    self._set_status("等待选人阶段…")
+            except Exception:
+                gameflow = None
+                self.gameflow = None
+                continue
+            stop.wait(1)
 
 
 def main() -> int:

@@ -63,21 +63,24 @@ def main() -> int:
             if data == original:
                 return 1
             # [6] 验证改后 bin 含 skin0 对象：反向别名应成功
-            import subprocess, tempfile
+            import shutil, subprocess, tempfile
             tmpdir = Path(tempfile.mkdtemp())
-            overlay_bin = tmpdir / "skin0.bin"
-            overlay_bin.write_bytes(data)
-            check = subprocess.run(
-                [str(swapper.learn_overlay), "bin-alias", str(overlay_bin), str(tmpdir / "out.bin"),
-                 f"characters/{champion}/skins/skin0",
-                 f"characters/{champion}/skins/skin999"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=60)
-            ok = check.returncode == 0 and "OK" in check.stdout
-            print(f"[6] 改后 bin 含 skin0 对象（反向改名成功）: {ok}")
-            if not ok:
-                print(check.stdout, check.stderr)
-                return 1
+            try:
+                overlay_bin = tmpdir / "skin0.bin"
+                overlay_bin.write_bytes(data)
+                check = subprocess.run(
+                    [str(swapper.learn_overlay), "bin-alias", str(overlay_bin), str(tmpdir / "out.bin"),
+                     f"characters/{champion}/skins/skin0",
+                     f"characters/{champion}/skins/skin999"],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace",
+                    timeout=60)
+                ok = check.returncode == 0 and "OK" in check.stdout
+                print(f"[6] 改后 bin 含 skin0 对象（反向改名成功）: {ok}")
+                if not ok:
+                    print(check.stdout, check.stderr)
+                    return 1
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
             wad.close()
     if not found:
         print(f"    失败：覆盖 WAD 中没有 {target}")

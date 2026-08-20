@@ -278,9 +278,12 @@ class SkinFloater:
                                    "若仍失败见 session/diag.log 的 DLL 日志")
                     else:
                         self._set_status(f"补丁器: {state} {detail}")
-                # 打印 DLL 日志到控制台（诊断用）
+                # 打印 DLL/HOST 日志到控制台（诊断用；logs 含 stderr + stdout dll 行）
                 for line in host.logs[seen_logs:]:
-                    log("DLL", line)
+                    if line.startswith("dll "):
+                        log("DLL", line[4:])
+                    else:
+                        log("HOST", line)
                 seen_logs = len(host.logs)
                 time.sleep(1)
             host.stop()

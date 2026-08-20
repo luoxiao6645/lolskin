@@ -22,13 +22,15 @@ YsnSkin 的架构（逆向结论，详见 [docs/01-architecture.md](docs/01-arch
 
 | 层 | YsnSkin 的实现 | 本项目的实现 | 状态 |
 |---|---|---|---|
-| 选择层（模式一） | WPF 悬浮窗 + LCU 轮询 | `ui/` tkinter 悬浮窗 | 规划中 |
+| 选择层（模式一） | WPF 悬浮窗 + LCU 轮询 | `ui/float_window.py` tkinter 悬浮窗 + `tools/floater.py` | ✅ |
 | LCU 集成 | C# HttpClient + lockfile | `ysnskin_learn/lcu.py` + `endpoints.py` | ✅ |
 | 皮肤目录 | data/skins.json（游戏目录数据） | `ysnskin_learn/catalog.py` + `data/` | ✅ |
-| WAD 解析/哈希表 | rift-overlay.exe（Rust，闭源） | `ysnskin_learn/hashing.py` + `lhdb.py` + `tools/wad_inspect.py` | ✅（已用真实游戏文件验证） |
-| 覆盖 WAD 构建 | rift-overlay.exe（Rust，闭源） | `ysnskin_learn/wad.py` + `prop.py` + `overlay.py`（自写格式解析） | 下一步 |
-| 补丁器驱动 | 子进程 + 行协议 | `ysnskin_learn/patcher.py`（驱动官方补丁器） | 下一步 |
-| 特殊皮肤适配 | 52 项能力（闭源） | 学习笔记，不做全量适配 | 记录 |
+| WAD 解析/哈希表 | rift-overlay.exe（Rust，闭源） | `ysnskin_learn/hashing.py` + `lhdb.py` + `wad.py` + `tools/wad_inspect.py` | ✅（真实游戏文件验证） |
+| 覆盖 WAD 构建 | rift-overlay.exe（Rust，闭源） | `learn-overlay/`（Rust CLI，复用 crates.io 的 ltk_overlay，与 ltk-manager 同款引擎） | ✅ |
+| 补丁器驱动 | 子进程 + 行协议 | `ysnskin_learn/patcher.py`（驱动官方补丁器） | ✅ |
+| mod 生成（skinN→skin0） | entry-alias（闭源） | `ysnskin_learn/modgen.py`（skinN.bin 整体替换） | ✅ |
+| 编排层 | C# 状态机 | `ysnskin_learn/overlay.py` + `tools/skin_swap.py` | ✅ |
+| 特殊皮肤适配 | 52 项能力（闭源） | 不做全量适配（简单皮肤先行） | 记录 |
 
 关键技术细节全部来自对 YsnSkin 二进制、官方开源项目（ltk-manager / league-mod / wadtools）的逆向与阅读，笔记见 [docs/](docs/)。
 

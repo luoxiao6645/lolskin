@@ -1,0 +1,3 @@
+# 用 zig 作为 GNU 目标的链接器（zig cc 自带 mingw 头文件/库）
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\zig\\zig-cc.bat"

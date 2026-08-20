@@ -1,5 +1,6 @@
 """catalog 与 endpoints 模块测试（使用真实样本数据文件）。"""
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -51,6 +52,7 @@ class TestGameflow(unittest.TestCase):
         client.get_json.side_effect = lambda path: (
             phase if path.endswith("gameflow-phase") else session
         )
+        client.request.return_value = (200, b"")
         return Gameflow(client)
 
     def test_non_champ_select_returns_empty(self):
@@ -65,19 +67,42 @@ class TestGameflow(unittest.TestCase):
         self.assertEqual(state.champion_id, 1)
         self.assertEqual(state.selected_skin_id, 1000)
 
-    def test_select_skin_patches(self):
+    def test_select_skin_patches_my_selection(self):
+        """主路径：PATCH my-selection，仅传 selectedSkinId（对齐 YsnSkin）。"""
         gf = self._state()
-        gf.select_skin(1001)
-        gf.client.patch_json.assert_called_once()
-        path, body = gf.client.patch_json.call_args[0]
-        self.assertIn("champ-select/v1/session", path)
-        self.assertEqual(body["selectedSkinId"], 1001)
-        self.assertEqual(body["localPlayerCellId"], 5)
+        self.assertTrue(gf.select_skin(1001))
+        path, body = gf.client.request.call_args.args[1], gf.client.request.call_args.args[2]
+        self.assertIn("my-selection", path)
+        self.assertEqual(body, {"selectedSkinId": 1001})
 
-    def test_select_skin_outside_champ_select_raises(self):
-        gf = self._state(phase="Lobby")
-        with self.assertRaises(RuntimeError):
-            gf.select_skin(1001)
+    def test_select_skin_falls_back_to_action(self):
+        """兜底路径：my-selection 失败时 PATCH 本地 pick action。"""
+        client = mock.MagicMock()
+        session = {
+            "localPlayerCellId": 5,
+            "myTeam": [{"cellId": 5, "championId": 1, "selectedSkinId": 1000}],
+            "actions": [[{"id": 42, "actorCellId": 5, "type": "pick", "isInProgress": True}]],
+        }
+        client.request.side_effect = [
+            (404, b""),                      # my-selection 失败
+            (200, b""),                      # 忽略（GET session 由 get_json 走 request 会被 mock 拦截？）
+        ]
+        # get_json 内部走 request：这里直接构造 Gameflow 并手动 mock request 序列
+        gf = Gameflow(client)
+        # my-selection PATCH -> 404；GET session -> 200 session；actions PATCH -> 204
+        client.request.side_effect = [
+            (404, b""),
+            (200, json.dumps(session).encode()),
+            (204, b""),
+        ]
+        self.assertTrue(gf.select_skin(1001))
+        calls = [c.args for c in client.request.call_args_list]
+        self.assertIn("actions/42", calls[2][1])
+        self.assertEqual(calls[2][2], {"selectedSkinId": 1001})
+
+    def test_select_skin_invalid_id_returns_false(self):
+        gf = self._state()
+        self.assertFalse(gf.select_skin(0))
 
     def test_poller_calls_on_change(self):
         gf = self._state()

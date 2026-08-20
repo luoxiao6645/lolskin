@@ -40,8 +40,10 @@ class PatcherHost:
         self.elevate = elevate
         self.proc: subprocess.Popen | None = None
         self._events: list[PatcherEvent] = []
+        self._logs: list[str] = []          # stderr 日志行（含 DLL 内部 tracing）
         self._lock = threading.Lock()
         self._reader: threading.Thread | None = None
+        self._log_reader: threading.Thread | None = None
 
     # ---- 生命周期 ----
 
@@ -65,6 +67,8 @@ class PatcherHost:
         )
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
+        self._log_reader = threading.Thread(target=self._read_log_loop, daemon=True)
+        self._log_reader.start()
 
     def stop(self) -> None:
         """优雅退出：关闭 stdin 触发 EOF（实测协议）。"""
@@ -100,6 +104,18 @@ class PatcherHost:
             detail = parts[3] if len(parts) > 3 else ""
             with self._lock:
                 self._events.append(PatcherEvent(state, detail, elapsed))
+
+    def _read_log_loop(self) -> None:
+        """读取 stderr 日志（宿主 + DLL tracing 输出）。"""
+        assert self.proc is not None and self.proc.stderr is not None
+        for line in self.proc.stderr:
+            with self._lock:
+                self._logs.append(line.rstrip())
+
+    @property
+    def logs(self) -> list[str]:
+        with self._lock:
+            return list(self._logs)
 
     @property
     def events(self) -> list[PatcherEvent]:

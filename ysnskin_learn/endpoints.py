@@ -54,16 +54,56 @@ class Gameflow:
                 break
         return ChampSelectState(phase, champion_id, selected_skin_id, local_cell, True)
 
-    def select_skin(self, skin_id: int) -> None:
+    def select_skin(self, skin_id: int) -> bool:
         """PATCH 选人会话，把本地玩家的皮肤改为 skin_id（LCU 假选择）。
 
-        客户端 UI / 语音 / 加载框随之同步为目标皮肤；实际模型由覆盖 WAD 提供。
+        对齐 YsnSkin champion-select.js 的 performNativeSelectionPatch：
+        1) 主路径: PATCH /lol-champ-select/v1/session/my-selection {selectedSkinId}
+        2) 兜底:   部分客户端状态只接受对本地玩家 pick action 的更新，
+                   从 session.actions 找本地 pick action 再 PATCH actions/{id}
+        返回是否成功（不抛异常）。
         """
-        state = self.champ_select_state()
-        if not state.in_champ_select or state.local_cell_id <= 0:
-            raise RuntimeError("当前不在选人阶段，无法选择皮肤")
-        body = {"localPlayerCellId": state.local_cell_id, "selectedSkinId": int(skin_id)}
-        self.client.patch_json(CHAMP_SELECT_SESSION, body)
+        selection_id = int(skin_id)
+        if selection_id <= 0:
+            return False
+        # 主路径
+        status, _ = self.client.request("PATCH", CHAMP_SELECT_MY_SELECTION,
+                                        {"selectedSkinId": selection_id})
+        if status in (200, 201, 204):
+            return True
+        # 兜底路径：找本地玩家的 pick action
+        try:
+            session = self.client.get_json(CHAMP_SELECT_SESSION)
+        except Exception:
+            return False
+        local_cell = int(session.get("localPlayerCellId") or 0)
+        actions = session.get("actions") or []
+        # actions 可能是嵌套数组（按阶段分组），拍平
+        flat: list[dict] = []
+        def walk(node):
+            if isinstance(node, list):
+                for item in node:
+                    walk(item)
+            elif isinstance(node, dict):
+                flat.append(node)
+        walk(actions)
+        candidates = [
+            a for a in flat
+            if int(a.get("actorCellId") or -1) == local_cell
+            and int(a.get("id") or 0) > 0
+            and (not a.get("type") or str(a["type"]).lower() == "pick")
+        ]
+        if not candidates:
+            return False
+        # 优先进行中的 action，其次未完成，最后按 id 大者
+        candidates.sort(key=lambda a: (
+            2 if a.get("isInProgress") is True else (1 if a.get("completed") is False else 0),
+            int(a.get("id") or 0)))
+        action = candidates[-1]
+        status, _ = self.client.request(
+            "PATCH", f"{CHAMP_SELECT_SESSION}/actions/{int(action['id'])}",
+            {"selectedSkinId": selection_id})
+        return status in (200, 201, 204)
 
 
 class PhasePoller:

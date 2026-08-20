@@ -58,13 +58,16 @@ class PatcherHost:
         if not (self.overlay_dir / "DATA" / "FINAL").is_dir():
             raise PatcherError(
                 f"覆盖目录缺少 DATA/FINAL（不是有效的 overlay）: {self.overlay_dir}")
+        # 正常模式（对齐 ltk-manager 的 host 驱动）：通过 stdin 行协议配置
+        # 注意：不用 runoverlay 兼容模式——它不会发送 config loglevel，
+        # 导致 DLL 内部日志被默认级别过滤（实测看不到任何 ltk_patcher_dll:: 日志）。
         args = [str(self.patcher_host)]
         if self.elevate:
             args.append("--elevate")
         if self.debug:
-            args += ["--opts", "debugpatcher"]  # 提升日志级别，输出 DLL 内部 tracing
-        args += ["runoverlay", str(self.overlay_dir)]
-        log("C1", "启动补丁器", exe=str(self.patcher_host), elevate=self.elevate,
+            args.append("--opts")
+            args.append("debugpatcher")
+        log("C1", "启动补丁器（正常模式）", exe=str(self.patcher_host), elevate=self.elevate,
             overlay=str(self.overlay_dir))
         try:
             self.proc = subprocess.Popen(
@@ -96,6 +99,21 @@ class PatcherHost:
             error("C2", "补丁器启动后立即退出", returncode=rc,
                   stderr=stderr_tail.strip())
             raise PatcherError(f"补丁器启动失败（{hint}，code={rc}）")
+        # 发送配置序列（对齐 ltk-manager protocol.rs：loglevel=32 debug / flags=0 / prefix）
+        log_level = 32 if self.debug else 16
+        prefix = str(self.overlay_dir).rstrip("\\/") + "\\"
+        commands = (
+            f"config loglevel {log_level}\n"
+            "config flags 0\n"
+            f"config prefix {prefix}\n"
+            "start scan\n"
+        )
+        log("C2", "发送配置", commands=commands.replace("\n", " | "))
+        try:
+            self.proc.stdin.write(commands)
+            self.proc.stdin.flush()
+        except OSError as exc:
+            raise PatcherError(f"补丁器配置发送失败（stdin 已关闭）: {exc}") from exc
         log("C2", "补丁器进程存活", pid=self.proc.pid)
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
@@ -103,8 +121,14 @@ class PatcherHost:
         self._log_reader.start()
 
     def stop(self) -> None:
-        """优雅退出：关闭 stdin 触发 EOF（实测协议）。"""
+        """优雅退出：先发 stop 命令，再关 stdin 触发 EOF（正常模式协议）。"""
         if self.proc is not None and self.proc.poll() is None:
+            try:
+                if self.proc.stdin:
+                    self.proc.stdin.write("stop\n")
+                    self.proc.stdin.flush()
+            except OSError:
+                pass
             try:
                 self.proc.stdin.close()
             except OSError:

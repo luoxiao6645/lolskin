@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ysnskin-learn"
+version = "0.1.0"
+description = "基于 YsnSkin 逆向分析的个人换肤学习项目（非商业）"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+# zstandard: 读取游戏 WAD 的 zstd 压缩 chunk（wad.py 可选依赖）
+# xxhash:     开发期对照验证 xxh64 实现
+extras = ["zstandard", "xxhash"]
+
+[tool.setuptools]
+packages = ["ysnskin_learn"]

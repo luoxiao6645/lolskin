@@ -83,22 +83,16 @@ class TestGameflow(unittest.TestCase):
             "myTeam": [{"cellId": 5, "championId": 1, "selectedSkinId": 1000}],
             "actions": [[{"id": 42, "actorCellId": 5, "type": "pick", "isInProgress": True}]],
         }
-        client.request.side_effect = [
-            (404, b""),                      # my-selection 失败
-            (200, b""),                      # 忽略（GET session 由 get_json 走 request 会被 mock 拦截？）
-        ]
-        # get_json 内部走 request：这里直接构造 Gameflow 并手动 mock request 序列
+        client.get_json.side_effect = lambda path: session
+        # my-selection PATCH -> 404；actions PATCH -> 204
+        client.request.side_effect = [(404, b""), (204, b"")]
         gf = Gameflow(client)
-        # my-selection PATCH -> 404；GET session -> 200 session；actions PATCH -> 204
-        client.request.side_effect = [
-            (404, b""),
-            (200, json.dumps(session).encode()),
-            (204, b""),
-        ]
         self.assertTrue(gf.select_skin(1001))
         calls = [c.args for c in client.request.call_args_list]
-        self.assertIn("actions/42", calls[2][1])
-        self.assertEqual(calls[2][2], {"selectedSkinId": 1001})
+        self.assertEqual(len(calls), 2)
+        self.assertIn("my-selection", calls[0][1])
+        self.assertIn("actions/42", calls[1][1])
+        self.assertEqual(calls[1][2], {"selectedSkinId": 1001})
 
     def test_select_skin_invalid_id_returns_false(self):
         gf = self._state()

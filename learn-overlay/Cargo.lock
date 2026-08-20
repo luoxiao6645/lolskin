@@ -561,6 +561,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
 
 [[package]]
+name = "enum_dispatch"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
+dependencies = [
+ "once_cell",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "equator"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -900,6 +912,8 @@ name = "learn-overlay"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "ltk_hash",
+ "ltk_meta",
  "ltk_overlay",
  "tracing",
  "tracing-subscriber",
@@ -1008,6 +1022,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ltk_hash"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ada44666d233f89786fdfd6784346a140ddfc7c31d31ac23dfa7b066f9fbe41b"
+dependencies = [
+ "byteorder",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "ltk_io_ext"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1028,6 +1052,26 @@ dependencies = [
  "byteorder",
  "glam",
  "ltk_primitives 0.3.5",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "ltk_meta"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b46b10820509cda6ec4cb8799e39f26997e0c6acc52baf66351e6604b637e298"
+dependencies = [
+ "byteorder",
+ "enum_dispatch",
+ "glam",
+ "indexmap",
+ "log",
+ "ltk_hash",
+ "ltk_io_ext 0.4.4",
+ "ltk_primitives 0.3.5",
+ "miette",
+ "num_enum",
+ "paste",
  "thiserror 1.0.69",
 ]
 
@@ -1207,6 +1251,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "miette"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f98efec8807c63c752b5bd61f862c165c115b0a35685bdcfd9238c7aeb592b7"
+dependencies = [
+ "cfg-if",
+ "miette-derive",
+ "unicode-width",
+]
+
+[[package]]
+name = "miette-derive"
+version = "7.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db5b29714e950dbb20d5e6f74f9dcec4edbcc1067bb7f8ed198c097b8c1a818b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2347,6 +2413,12 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-width"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
 
 [[package]]
 name = "utf8parse"

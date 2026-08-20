@@ -38,6 +38,19 @@ enum Cmd {
         #[arg(long)]
         state_dir: PathBuf,
     },
+    /// 对象改名：把 bin 里 path_hash 为 old_path 的对象改名为 new_path。
+    /// PROP 只存 path_hash 不存路径字符串；用于 skinN 对象别名到 skin0
+    /// （对齐 YsnSkin entry-alias，满足 DLL 的 base-skin 验证 78555f28）。
+    BinAlias {
+        /// 输入 bin 文件
+        input: PathBuf,
+        /// 输出 bin 文件
+        output: PathBuf,
+        /// 旧对象路径（如 characters/lissandra/skins/skin34）
+        old_path: String,
+        /// 新对象路径（如 characters/lissandra/skins/skin0）
+        new_path: String,
+    },
 }
 
 fn utf8(p: &PathBuf, what: &str) -> Result<String, String> {
@@ -97,5 +110,43 @@ fn main() -> Result<(), String> {
             }
             Ok(())
         }
+        Cmd::BinAlias {
+            input,
+            output,
+            old_path,
+            new_path,
+        } => bin_alias(&input, &output, &old_path, &new_path),
     }
+}
+
+/// bin-alias：把对象的 path_hash 从 old_path 改为 new_path（内容不变）。
+fn bin_alias(input: &PathBuf, output: &PathBuf, old_path: &str, new_path: &str) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::BufReader;
+
+    use ltk_hash::{BinHash, Hash};
+    use ltk_meta::property::NoMeta;
+    use ltk_meta::Bin;
+
+    let old_hash = BinHash::hash_str(old_path);
+    let new_hash = BinHash::hash_str(new_path);
+    println!("bin-alias: {old_path} ({old_hash:x}) -> {new_path} ({new_hash:x})");
+
+    let file = File::open(input).map_err(|e| format!("打开输入失败 {input:?}: {e}"))?;
+    let mut bin = Bin::<NoMeta>::from_reader(&mut BufReader::new(file))
+        .map_err(|e| format!("解析 bin 失败: {e}"))?;
+
+    let obj = bin
+        .remove_object(old_hash)
+        .ok_or_else(|| format!("对象 {old_hash:x} ({old_path}) 不存在（共 {} 个对象）", bin.len()))?;
+    println!("找到对象: class={:08x} properties={}", obj.class_hash, obj.properties.len());
+
+    let mut renamed = obj;
+    renamed.path_hash = new_hash;
+    bin.add_object(renamed);
+
+    let mut out = File::create(output).map_err(|e| format!("创建输出失败 {output:?}: {e}"))?;
+    bin.to_writer(&mut out).map_err(|e| format!("写入 bin 失败: {e}"))?;
+    println!("OK 已写出 {output:?}，对象数={}", bin.len());
+    Ok(())
 }

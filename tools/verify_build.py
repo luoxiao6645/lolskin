@@ -55,12 +55,28 @@ def main() -> int:
             data = wad.read_chunk(chunk)
             print(f"[4] {wad_path.name} 中 {target}: {len(data)} 字节, "
                   f"magic={data[:4]!r} version={int.from_bytes(data[4:8], 'little')}")
-            # 与原始 skinN.bin 对比
+            # 与原始 skinN.bin 对比（bin-alias 改了 path_hash，应不同）
             game_wad = Wad(Path(swapper.game_dir) / "DATA" / "FINAL" / "Champions" / f"{champion.capitalize()}.wad.client")
             original = game_wad.read_path(f"data/characters/{champion}/skins/skin{skin_num}.bin")
             game_wad.close()
-            print(f"[5] 内容与原始 skin{skin_num}.bin 一致: {data == original}")
-            if data != original:
+            print(f"[5] 内容已应用 bin-alias（与原始 skin{skin_num}.bin 不同）: {data != original}")
+            if data == original:
+                return 1
+            # [6] 验证改后 bin 含 skin0 对象：反向别名应成功
+            import subprocess, tempfile
+            tmpdir = Path(tempfile.mkdtemp())
+            overlay_bin = tmpdir / "skin0.bin"
+            overlay_bin.write_bytes(data)
+            check = subprocess.run(
+                [str(swapper.learn_overlay), "bin-alias", str(overlay_bin), str(tmpdir / "out.bin"),
+                 f"characters/{champion}/skins/skin0",
+                 f"characters/{champion}/skins/skin999"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=60)
+            ok = check.returncode == 0 and "OK" in check.stdout
+            print(f"[6] 改后 bin 含 skin0 对象（反向改名成功）: {ok}")
+            if not ok:
+                print(check.stdout, check.stderr)
                 return 1
             wad.close()
     if not found:

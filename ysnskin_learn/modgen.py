@@ -31,16 +31,44 @@ def build_skin_swap_mod(
     champion: str,
     skin_num: int,
     out_mod_dir: str | Path,
+    learn_overlay: str | Path | None = None,
 ) -> Path:
-    """提取 skinN.bin 并生成 skin0 覆盖 mod。champion 为小写别名（如 'ahri'）。
+    """提取 skinN.bin，对象别名到 skin0，生成覆盖 mod。
 
-    mod 的 WAD 目录名 = 游戏内 WAD 文件名（如 Ahri.wad.client），
-    构建时 ltk_overlay 按 chunk-hash 把文件路由到 DATA/FINAL/Champions/Ahri.wad.client。
+    关键：DLL 的 base-skin 验证要求覆盖后的 skin0.bin 里存在名为
+    characters/<x>/skins/skin0 的对象（hash 78555f28 族）。整体替换会丢失该
+    对象导致 overlay 被禁用，因此用 bin-alias 把根对象改名（PROP 只存
+    path_hash，改一个 u32 即可；内容/依赖/资源引用全部不变）。
     """
+    import shutil
+    import subprocess
+    import tempfile
+
     src_path = f"data/characters/{champion}/skins/skin{skin_num}.bin"
     data = wad.read_path(src_path)
     if data is None:
         raise FileNotFoundError(f"WAD 中不存在 {src_path}")
+
+    # bin-alias：根对象 characters/<x>/skins/skinN -> skin0
+    old_path = f"characters/{champion}/skins/skin{skin_num}"
+    new_path = f"characters/{champion}/skins/skin0"
+    if learn_overlay is not None and Path(learn_overlay).is_file():
+        with tempfile.TemporaryDirectory() as tmp:
+            raw = Path(tmp) / "raw.bin"
+            aliased = Path(tmp) / "aliased.bin"
+            raw.write_bytes(data)
+            proc = subprocess.run(
+                [str(learn_overlay), "bin-alias", str(raw), str(aliased),
+                 old_path, new_path],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=60,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(f"bin-alias 失败: {proc.stdout} {proc.stderr}")
+            data = aliased.read_bytes()
+    else:
+        # 无 learn-overlay（纯 Python 环境）：退化提示（构建仍需 learn-overlay）
+        raise RuntimeError("bin-alias 需要 learn-overlay（先 cargo build --release）")
 
     # 覆盖目标路径：skin0.bin（游戏加载的入口）
     dst_rel = Path("data") / "characters" / champion / "skins" / "skin0.bin"
@@ -73,6 +101,7 @@ def build_swap_for_skin(
     champion: str,
     skin_num: int,
     out_mod_dir: str | Path,
+    learn_overlay: str | Path | None = None,
 ) -> Path:
     """便捷入口：打开英雄 WAD 并生成 mod。champion 为小写别名。"""
     wad_path = Path(game_dir) / "DATA" / "FINAL" / "Champions" / f"{champion.capitalize()}.wad.client"
@@ -83,4 +112,5 @@ def build_swap_for_skin(
             raise FileNotFoundError(f"找不到英雄 WAD: {wad_path}")
         wad_path = matches[0]
     with Wad(wad_path) as wad:
-        return build_skin_swap_mod(wad, champion, skin_num, out_mod_dir)
+        return build_skin_swap_mod(wad, champion, skin_num, out_mod_dir,
+                                   learn_overlay=learn_overlay)

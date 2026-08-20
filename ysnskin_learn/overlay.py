@@ -68,9 +68,10 @@ class SkinSwapper:
             if p.exists():
                 shutil.rmtree(p)
 
-        log("B1", "生成 mod（提取 skinN.bin → skin0 覆盖）",
+        log("B1", "生成 mod（提取 skinN.bin → bin-alias 对象改名 → skin0 覆盖）",
             champion=champion, skin_num=skin_num)
-        mod_dir = build_swap_for_skin(self.game_dir, champion, skin_num, mod_dir)
+        mod_dir = build_swap_for_skin(self.game_dir, champion, skin_num, mod_dir,
+                                      learn_overlay=self.learn_overlay)
         log("B2", "mod 生成完成", mod_dir=str(mod_dir))
 
         if not self.learn_overlay.is_file():

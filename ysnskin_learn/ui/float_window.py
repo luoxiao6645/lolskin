@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
 import tkinter as tk
@@ -46,6 +47,8 @@ class SkinFloater:
         self.champion_id = 0
         self.current_skin_id = 0
         self._busy = False
+        # 跨线程 UI 更新：后台线程只往队列投递，主线程 after 轮询消费（tkinter 线程安全模式）
+        self._ui_queue: queue.Queue = queue.Queue()
 
         self.root = tk.Tk()
         self.root.title("YsnSkin-Learn")
@@ -129,16 +132,41 @@ class SkinFloater:
     def _place_default(self) -> None:
         self.root.geometry(f"{WINDOW_W}x{WINDOW_H}+40+400")
 
-    # ---- 状态更新（LCU 轮询线程调用） ----
+    # ---- 状态更新（后台线程只投递队列，主线程消费） ----
 
     def on_state(self, state: ChampSelectState) -> None:
+        self._ui_queue.put(("state", state))
+
+    def _set_status(self, text: str, color: str | None = None) -> None:
+        self._ui_queue.put(("status", text, color))
+        print(f"[floater] {text}", flush=True)  # 控制台同步打印，便于诊断
+
+    def _drain_ui_queue(self) -> None:
+        """主线程消费 UI 队列（由 root.after 周期调度）。"""
+        try:
+            while True:
+                item = self._ui_queue.get_nowait()
+                kind = item[0]
+                if kind == "state":
+                    self._apply_state(item[1])
+                elif kind == "status":
+                    self._apply_status(item[1], item[2])
+        except queue.Empty:
+            pass
+        self.root.after(100, self._drain_ui_queue)
+
+    def _apply_status(self, text: str, color: str | None) -> None:
+        self.status_var.set(text)
+        self.status_label_color(color or MUTED)
+
+    def _apply_state(self, state: ChampSelectState) -> None:
         if not state.in_champ_select or state.champion_id <= 0:
             self.champion_id = 0
-            self.root.after(0, self._set_idle)
+            self._set_idle()
             return
         self.champion_id = state.champion_id
         self.current_skin_id = state.selected_skin_id
-        self.root.after(0, self._set_champion)
+        self._set_champion()
 
     def _set_idle(self) -> None:
         self.title_var.set("YsnSkin-Learn · 未在选人阶段")
@@ -227,10 +255,6 @@ class SkinFloater:
             self._busy = False
             self.root.after(0, lambda: self.swap_btn.configure(state="normal"))
 
-    def _set_status(self, text: str, color: str | None = None) -> None:
-        self.root.after(0, lambda: (self.status_var.set(text),
-                                    self.status_label_color(color)))
-
     def status_label_color(self, color: str | None) -> None:
         for child in self.root.winfo_children():
             for sub in child.winfo_children():
@@ -243,6 +267,7 @@ class SkinFloater:
     def run(self) -> None:
         stop = threading.Event()
         threading.Thread(target=self._poll_loop, args=(stop,), daemon=True).start()
+        self.root.after(100, self._drain_ui_queue)  # 主线程消费 UI 队列
         self.root.protocol("WM_DELETE_WINDOW", lambda: (stop.set(), self.root.destroy()))
         try:
             self.root.mainloop()
@@ -275,8 +300,8 @@ class SkinFloater:
                 if key != last_key:
                     last_key = key
                     self.on_state(state)
-                if not state.in_champ_select:
-                    self._set_status("等待选人阶段…")
+                    if not state.in_champ_select:
+                        self._set_status(f"等待选人阶段…（当前 {state.phase}）")
             except Exception:
                 gameflow = None
                 self.gameflow = None

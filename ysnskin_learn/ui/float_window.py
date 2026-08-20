@@ -142,17 +142,28 @@ class SkinFloater:
         print(f"[floater] {text}", flush=True)  # 控制台同步打印，便于诊断
 
     def _drain_ui_queue(self) -> None:
-        """主线程消费 UI 队列（由 root.after 周期调度）。"""
-        try:
-            while True:
+        """主线程消费 UI 队列（由 root.after 周期调度）。
+
+        单条消息处理失败不能中断队列消费（否则 after 链断裂，界面永久冻结）。
+        """
+        while True:
+            try:
                 item = self._ui_queue.get_nowait()
-                kind = item[0]
+            except queue.Empty:
+                break
+            kind = item[0]
+            try:
                 if kind == "state":
-                    self._apply_state(item[1])
+                    st = item[1]
+                    print(f"[floater][消费] state phase={st.phase} in_cs={st.in_champ_select} "
+                          f"champion={st.champion_id} skin={st.selected_skin_id}", flush=True)
+                    self._apply_state(st)
                 elif kind == "status":
                     self._apply_status(item[1], item[2])
-        except queue.Empty:
-            pass
+            except Exception as exc:
+                import traceback
+                print(f"[floater][UI异常] {kind}: {exc}", flush=True)
+                traceback.print_exc()
         self.root.after(100, self._drain_ui_queue)
 
     def _apply_status(self, text: str, color: str | None) -> None:

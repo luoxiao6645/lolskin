@@ -47,14 +47,15 @@ class Gameflow:
         local_cell = session.get("localPlayerCellId")
         champion_id = 0
         selected_skin_id = 0
+        # 注意：cellId/localPlayerCellId 可能为 0（训练营/人机对局），
+        # 不能用 `or -1` 之类的 falsy 兜底——0 是合法值
+        local_cell_int = int(local_cell) if local_cell is not None else -1
         for member in session.get("myTeam") or []:
-            # 注意：cellId 可能为 0（训练营/人机对局 localPlayerCellId=0），
-            # 不能用 `or -1` 之类的 falsy 兜底——0 是合法值
-            if member.get("cellId") is not None and int(member.get("cellId")) == int(local_cell or -1):
+            if member.get("cellId") is not None and int(member.get("cellId")) == local_cell_int:
                 champion_id = int(member.get("championId") or member.get("championPickIntent") or 0)
                 selected_skin_id = int(member.get("selectedSkinId") or 0)
                 break
-        return ChampSelectState(phase, champion_id, selected_skin_id, int(local_cell or 0), True)
+        return ChampSelectState(phase, champion_id, selected_skin_id, local_cell_int, True)
 
     def select_skin(self, skin_id: int) -> bool:
         """PATCH 选人会话，把本地玩家的皮肤改为 skin_id（LCU 假选择）。
@@ -92,7 +93,7 @@ class Gameflow:
         candidates = [
             a for a in flat
             if a.get("actorCellId") is not None
-            and int(a.get("actorCellId")) == int(local_cell or -1)
+            and int(a.get("actorCellId")) == local_cell_int
             and int(a.get("id") or 0) > 0
             and (not a.get("type") or str(a["type"]).lower() == "pick")
         ]

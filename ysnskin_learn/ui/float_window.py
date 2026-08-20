@@ -260,7 +260,8 @@ class SkinFloater:
                         self._set_status(f"已选择 {skin.name}，补丁器待命")
                 except Exception as exc:
                     log("SWAP", "LCU 同步失败（不影响游戏内换肤）", error=str(exc))
-            # 4) 保持补丁器运行直到游戏结束，实时显示状态
+            # 4) 保持补丁器运行直到本局结束（dll detached 后停止——重定向表
+            #    在注入时固定，跨局复用旧 overlay 会导致下局不生效）
             last_state = ""
             seen_logs = 0
             while host.proc is not None and host.proc.poll() is None:
@@ -276,6 +277,11 @@ class SkinFloater:
                         error("PATCHER", "注入失败", detail=detail,
                               hint="游戏以管理员运行时补丁器必须 --elevate（已默认）；"
                                    "若仍失败见 session/diag.log 的 DLL 日志")
+                    elif state == "exited":
+                        # 本局结束：停止补丁器，下局需重新选皮肤
+                        self._set_status("本局结束——下局请重新选择皮肤", MUTED)
+                        log("SWAP", "游戏退出（dll detached），停止补丁器")
+                        break
                     else:
                         self._set_status(f"补丁器: {state} {detail}")
                 # 打印 DLL/HOST 日志到控制台（诊断用；logs 含 stderr + stdout dll 行）
@@ -287,8 +293,8 @@ class SkinFloater:
                 seen_logs = len(host.logs)
                 time.sleep(1)
             host.stop()
-            log("SWAP", "补丁器已停止（游戏退出）")
-            self._set_status("补丁器已停止（游戏退出）")
+            log("SWAP", "补丁器已停止")
+            self._set_status("补丁器已停止（本局结束）")
         except Exception as exc:
             error("SWAP", "换肤流程失败", error=str(exc),
                   hint="按上方环节标记（B*/C*/DLL）定位；详见 session/diag.log")

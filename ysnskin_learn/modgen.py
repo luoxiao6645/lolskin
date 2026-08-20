@@ -51,12 +51,16 @@ def build_skin_swap_mod(
     target.write_bytes(data)
 
     # 最小 mod.config.json（ltk_mod_project::ModProject 必填字段；authors 为字符串数组）
+    # 注意：必须显式声明 layers —— ltk_overlay 0.5.2 的收集逻辑直接遍历
+    # project.layers，缺省空数组会收集到 0 个覆盖文件（注释里的"默认 base 层"
+    # 约定在 0.5.2 中并未实现）。
     config = {
         "name": f"skin-swap-{champion}-{skin_num}",
         "display_name": f"{champion} Skin{skin_num} -> Skin0",
         "version": "1.0.0",
         "description": f"auto-generated skin swap: show skin{skin_num} as skin0 ({champion})",
         "authors": ["YsnSkin-Learn"],
+        "layers": [{"name": "base", "priority": 0}],
     }
     (mod_root / "mod.config.json").write_text(
         json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8"

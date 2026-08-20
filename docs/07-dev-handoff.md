@@ -100,35 +100,33 @@ let result = builder.build()?;   // OverlayBuildResult { overlay_root, wads_buil
 - 内置 linked-bin 依赖检查（collect_linked_bin_offenders）；
 - `build()` 在 enabled_mods 为空时返回 OK + 0 WAD（**这正是当前怀疑点之一，见 §5**）。
 
-## 5. 当前卡点：wads_built=0（调试进行中）
+## 5. 当前卡点：wads_built=0（✅ 已修复）
 
 **现象**：`learn-overlay build` 返回 OK，但 `wads_built=0 wads_reused=0`；
 `verify_build ahri 1` 报"覆盖 WAD 数量: 0"。
 
-**已排查/已修复**：
-- ✅ mod.config.json：authors 字符串数组、display_name snake_case（已修）；
-- ✅ mod 内容提取正确（skin0.bin 覆盖 = 18484B = skin1.bin 原文）；
-- 🔶 **未完成**：`main.rs` 已加 tracing-subscriber 日志（info 级），
-  **但修改后尚未重新编译运行**——这是第二次开发的第一个动作：
-  ```powershell
-  # 编译后运行（RUST_LOG=debug 可看更细）
-  C:\ltk-target\release\learn-overlay.exe build --game-dir "E:\Program Files (x86)\英雄联盟(26)\Game" --mod-dir "E:\下载\YsnSkin-Learn\session\mods\ahri-skin1" --overlay-root "E:\下载\YsnSkin-Learn\session\overlays\ahri-skin1" --state-dir "E:\下载\YsnSkin-Learn\session\state\ahri-skin1"
-  ```
+**根因（已定位并修复）**：ltk_overlay 0.5.2 的 `collect_single_mod_metadata`
+直接遍历 `project.layers`（来自 mod.config.json）；缺省 `layers` 字段时
+serde 给空数组，**注释中"默认 base 层"的约定在 0.5.2 并未实现** → 收集到
+0 个覆盖文件（`override_meta.bin` 仅 93 字节为证）。
 
-**怀疑方向**（按概率排序）：
-1. mod 覆盖文件未被收集（`collect_all_override_metadata` 为空）——层名/base 目录、
-   WAD 目录名、`mod_project()` 解析等；tracing 日志可直接确认；
-2. `collect_active_mod_fingerprints` 返回空导致 mod 被跳过；
-3. 0.5.2 的 FsModContent 对 content 目录结构有额外要求（对照
-   `reference/league-mod/crates/ltk_overlay/src/content.rs` 与 registry 0.5.2 源码）。
+**修复**：`modgen.py` 的 mod.config.json 显式声明
+`"layers": [{"name": "base", "priority": 0}]`（ModProjectLayer 的
+name/priority 均无 serde default）。
 
-**排查手段**：读 `C:\Users\13485\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ltk_overlay-0.5.2\src\builder\mod.rs`
-的 `collect_all_override_metadata`（约 700 行附近）+ tracing 日志对照。
+**验证（2026-08-21 第二次开发）**：`tools/verify_build.py` 对
+ahri skin1/skin7/skin52、lux skin7 全部通过（覆盖 WAD 中 skin0.bin 内容
+与原始 skinN.bin 逐字节一致）；`skin_swap --build-only` CLI 全链路正常；
+28 个 unittest 全过。提交 `748827f`。
+
+**调试经验**：给 learn-overlay 加 tracing-subscriber（`RUST_LOG=ltk_overlay=debug`
+可看到 collect 阶段 "Collected 0 unique override metadata entries"）；状态
+目录里的 `overlay.json`/`override_meta.bin` 是判断收集是否成功的快速指标。
 
 ## 6. 第二次开发任务清单（按优先级）
 
-- [ ] **P0** 重编译 learn-overlay（带 tracing）→ 运行 → 修复 wads_built=0 → `python -m tools.verify_build ahri 1` 全绿
-- [ ] **P0** 端到端无游戏验证：`python -m tools.skin_swap --build-only ahri 7`（构建链全通）
+- [x] **P0** 修复 wads_built=0 → `verify_build ahri 1` 全绿（2026-08-21 完成）
+- [x] **P0** `skin_swap --build-only` 构建链全通
 - [ ] **P1** 实机验证（需用户配合：启动游戏 → 训练模式/选人阶段）：
       `python -m tools.skin_swap ahri 7` 或 `python -m tools.floater`
       → 观察补丁器状态（injecting→injected）→ 游戏内确认换肤生效

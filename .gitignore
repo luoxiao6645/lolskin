@@ -8,3 +8,5 @@ dist/
 # 运行产物
 session/
 overlays/
+# 大体积可再下载数据（mimir 哈希表）
+data/hashes/

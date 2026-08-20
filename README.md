@@ -1,6 +1,6 @@
 # lol换肤学习项目
 
-一个**学习项目**：基于对项目https://github.com/LeagueToolkit/ltk-manager)]和项目YsnSkin.用 **Python 3.11（零第三方依赖起步）** 从零实现一个《英雄联盟》换肤工具的原型。
+一个**学习项目**：基于对项目https://github.com/LeagueToolkit/ltk-manager和项目YsnSkin.用 **Python 3.11（零第三方依赖起步）** 从零实现一个《英雄联盟》换肤工具的原型。
 
 > ⚠️ **声明**：本项目仅用于个人学习与技术研究，**不用于商业用途**。
 > 使用第三方工具修改游戏违反 Riot Games / 腾讯的服务条款，存在封号风险，请自行承担后果。
